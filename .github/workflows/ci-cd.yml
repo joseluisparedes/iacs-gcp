@@ -80,21 +80,36 @@ jobs:
   build-and-deploy:
     name: Build Containers & Deploy to Cloud Run
     needs: [backend-quality-gate, frontend-quality-gate, security-scan]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && secrets.GCP_SA_KEY != ''
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Código
         uses: actions/checkout@v4
 
+      - name: Validar Configuración de Despliegue en GCP
+        id: check-secrets
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+        run: |
+          if [ -z "$GCP_SA_KEY" ]; then
+            echo "GCP_SA_KEY no configurado en GitHub Secrets. Omitiendo despliegue a Cloud Run."
+            echo "deploy_ready=false" >> $GITHUB_OUTPUT
+          else
+            echo "deploy_ready=true" >> $GITHUB_OUTPUT
+          fi
+
       - name: Autenticación en Google Cloud
+        if: steps.check-secrets.outputs.deploy_ready == 'true'
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
 
       - name: Configurar SDK de Google Cloud
+        if: steps.check-secrets.outputs.deploy_ready == 'true'
         uses: google-github-actions/setup-gcloud@v2
 
       - name: Construir y Publicar Contenedores en Artifact Registry
+        if: steps.check-secrets.outputs.deploy_ready == 'true'
         run: |
           gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
           
@@ -107,6 +122,7 @@ jobs:
           docker push us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/iacs-repo/frontend:${{ github.sha }}
 
       - name: Desplegar Backend a Cloud Run
+        if: steps.check-secrets.outputs.deploy_ready == 'true'
         run: |
           gcloud run deploy iacs-backend \
             --image us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/iacs-repo/backend:${{ github.sha }} \
@@ -115,6 +131,7 @@ jobs:
             --allow-unauthenticated
 
       - name: Desplegar Frontend a Cloud Run
+        if: steps.check-secrets.outputs.deploy_ready == 'true'
         run: |
           gcloud run deploy iacs-frontend \
             --image us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/iacs-repo/frontend:${{ github.sha }} \
