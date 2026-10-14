@@ -1,5 +1,6 @@
-from typing import Any, Dict, List, Optional
-from uuid import UUID
+import io
+import re
+from typing import Any, Dict, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -396,10 +397,6 @@ async def reorder_ai_training(payload: Dict[str, Any], db: AsyncSession = Depend
     return {"success": True}
 
 
-import io
-import re
-
-
 def extract_text_from_file(filename: str, content_bytes: bytes) -> str:
     name = filename.lower()
     text = ""
@@ -497,7 +494,7 @@ async def chat_attach_file(
     content_bytes = await file.read()
     filename = file.filename or "adjunto.txt"
     name_lower = filename.lower()
-    
+
     # Determinar tipo
     if name_lower.endswith(".pdf"):
         type_key = "pdf"

@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from sqlalchemy import select, func, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.security import create_access_token, get_current_user_claims, verify_password, get_password_hash
-from app.domain.models import Profile, ProfileRole, AllowedUser, UserRoleWhitelist, VP, Direccion
+from app.domain.models import Profile, ProfileRole, AllowedUser, UserRoleWhitelist, VP
 from app.infrastructure.database import get_db
 
 router = APIRouter()
@@ -216,7 +216,7 @@ async def get_me(
 
     result = await db.execute(select(Profile).where(Profile.email == email))
     profile = result.scalar_one_or_none()
-    
+
     if profile:
         roles_result = await db.execute(select(ProfileRole).where(ProfileRole.profile_id == profile.id))
         roles = roles_result.scalars().all()

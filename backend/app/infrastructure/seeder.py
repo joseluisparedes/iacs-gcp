@@ -1,14 +1,10 @@
-import json
 import logging
 from datetime import datetime, timedelta, timezone
-from uuid import UUID, uuid4
 from sqlalchemy import select, func, update
-from sqlalchemy.ext.asyncio import AsyncSession
 from app.infrastructure.database import AsyncSessionLocal, Base, engine
 from app.domain.models import (
     VP, Direccion, Profile, ProfileRole, AppRole, AllowedUser, UserRoleWhitelist, Initiative,
-    InitiativeField, WorkflowDefinition, WorkflowNodeRole, WorkflowTransition, WorkflowRoleAssignment,
-    StageForm, StageConsent, DocumentTemplate,
+    WorkflowDefinition, WorkflowNodeRole, WorkflowTransition, StageForm, StageConsent, DocumentTemplate,
     AIKnowledgeFolder, AITrainingConfig, AgentLog, EmailLog, SiteSetting
 )
 
@@ -434,9 +430,13 @@ AI_TRAINING_CONFIG_SEED = [
 
 async def seed_database_if_needed():
     """Siembra inicial y sincronización completa de datos para garantizar paridad 1:1."""
-    async with engine.begin() as conn:
-        # Asegurar creación de todas las tablas definidas en modelos
-        await conn.run_sync(Base.metadata.create_all)
+    try:
+        async with engine.begin() as conn:
+            # Asegurar creación de todas las tablas definidas en modelos
+            await conn.run_sync(Base.metadata.create_all)
+    except Exception as e:
+        logger.warning(f"[Seeder] No se pudo conectar a la base de datos para sembrar: {e}")
+        return
 
     async with AsyncSessionLocal() as db:
         try:
@@ -647,7 +647,7 @@ async def seed_database_if_needed():
                         db.add(prof_obj)
                         await db.commit()
                         await db.refresh(prof_obj)
-                    
+
                     # ProfileRole
                     pr_res = await db.execute(select(ProfileRole).where(ProfileRole.profile_id == prof_obj.id))
                     if not pr_res.scalars().all():
@@ -666,10 +666,6 @@ async def seed_database_if_needed():
 
 
             # 5. Iniciativas de Muestra (11 iniciativas idénticas a Image 1)
-            init_count_res = await db.execute(select(func.count(Initiative.id)))
-            current_count = init_count_res.scalar_one() or 0
-
-            # Si hay menos de 11 iniciativas, sembramos las 11
             for sample in SAMPLE_INITIATIVES:
                 s_res = await db.execute(select(Initiative).where(Initiative.id == sample["id"]))
                 existing = s_res.scalar_one_or_none()

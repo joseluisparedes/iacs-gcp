@@ -1,5 +1,7 @@
-from typing import Any, Dict, List
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+import calendar
+from datetime import datetime
+
+from fastapi import APIRouter, Depends, File, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.domain.models import AITrainingConfig
@@ -11,29 +13,26 @@ router = APIRouter()
 ai_service = VertexAIService()
 
 
-from datetime import datetime, timezone
-import calendar
-
 def get_date_context_section() -> str:
     now = datetime.now()
     d = str(now.day).zfill(2)
     m = str(now.month).zfill(2)
     y = now.year
     today_str = f"{d}/{m}/{y}"
-    
+
     month_names = [
         "enero", "febrero", "marzo", "abril", "mayo", "junio",
         "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"
     ]
     today_readable = f"{now.day} de {month_names[now.month - 1]} de {y}"
-    
+
     def format_offset(months_ahead: int) -> str:
         new_m = ((now.month - 1 + months_ahead) % 12) + 1
         new_y = now.year + ((now.month - 1 + months_ahead) // 12)
         max_d = calendar.monthrange(new_y, new_m)[1]
         target_d = min(now.day, max_d)
         return f"{str(target_d).zfill(2)}/{str(new_m).zfill(2)}/{new_y}"
-        
+
     def end_of_month(months_ahead: int = 0) -> str:
         new_m = ((now.month - 1 + months_ahead) % 12) + 1
         new_y = now.year + ((now.month - 1 + months_ahead) // 12)
@@ -62,12 +61,12 @@ def get_date_context_section() -> str:
 async def get_system_prompt_from_db(db: AsyncSession) -> str:
     """Construye el system prompt de Teo concatenando identidad, contexto temporal, Grill-Me y carpetas de conocimiento."""
     from app.domain.models import AIKnowledgeFolder
-    
+
     # 1. Obtener carpetas para mapeo de rutas jerárquicas
     folders_res = await db.execute(select(AIKnowledgeFolder))
     folders = folders_res.scalars().all()
     folder_map = {f.id: f for f in folders}
-    
+
     def build_path(fid):
         if not fid or fid not in folder_map:
             return ""
@@ -82,7 +81,7 @@ async def get_system_prompt_from_db(db: AsyncSession) -> str:
         .order_by(AITrainingConfig.sort_order)
     )
     configs = result.scalars().all()
-    
+
     identity = (
         "Eres Teo, Asesor Senior de Arquitectura e Iniciativas de TI en IACS. "
         "Tu propósito es guiar de forma empática, ejecutiva y analítica a los solicitantes para estructurar iniciativas "
@@ -91,14 +90,14 @@ async def get_system_prompt_from_db(db: AsyncSession) -> str:
         "y nunca saturas al usuario con muros de texto ni cuestionarios abrumadores. Avanzas paso a paso, abordando "
         "un solo aspecto crítico por turno."
     )
-    
+
     for c in configs:
         if c.layer == "identity":
             identity = c.content
             break
 
     date_section = f"\n\n{get_date_context_section()}"
-    
+
     dialogue_guidelines = """
 ## Directivas de Diálogo Progresivo y Concisión Ejecutiva (OBLIGATORIO)
 1. **Extrema Concisión**: Escribe mensajes breves, cálidos y directos (máximo 2 a 3 párrafos cortos de 2 a 3 líneas cada uno). NUNCA redactes textos kilométricos ni discursos teóricos.

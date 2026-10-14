@@ -1,9 +1,8 @@
-from typing import Any, Dict, List, Optional
-from uuid import UUID
+from typing import Any, Dict, Optional
+from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select, delete, func
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.core.security import require_role
 from app.domain.models import (
     AppRole, Direccion, Profile, ProfileRole, VP,
     AllowedUser, UserRoleWhitelist,
@@ -28,7 +27,7 @@ async def trigger_seeder():
 async def list_roles(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(AppRole).order_by(AppRole.is_system.desc(), AppRole.name.asc()))
     roles = result.scalars().all()
-    
+
     # Contar usuarios asociados a cada rol
     count_res = await db.execute(
         select(UserRoleWhitelist.role, func.count(UserRoleWhitelist.id)).group_by(UserRoleWhitelist.role)

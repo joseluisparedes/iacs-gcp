@@ -206,19 +206,19 @@ class WorkflowEngine:
             if is_rejection and not matched_node_role.get("can_reject", False):
                 return WorkflowTransitionResult(
                     allowed=False,
-                    reason=f"El rol asignado no cuenta con permiso para rechazar u observar desde este estado."
+                    reason="El rol asignado no cuenta con permiso para rechazar u observar desde este estado."
                 )
             if not is_rejection and not matched_node_role.get("can_approve", False):
                 return WorkflowTransitionResult(
                     allowed=False,
-                    reason=f"El rol asignado no cuenta con permiso para aprobar o avanzar desde este estado."
+                    reason="El rol asignado no cuenta con permiso para aprobar o avanzar desde este estado."
                 )
 
         # 4. Validación de campos requeridos del nodo
         required_fields = []
         if matched_node_role and matched_node_role.get("required_fields"):
             required_fields.extend(matched_node_role.get("required_fields"))
-        
+
         curr_node = next((n for n in nodes if n.get("id") == current_node_id), None)
         if curr_node and curr_node.get("data", {}).get("requiredFields"):
             required_fields.extend(curr_node.get("data", {}).get("requiredFields"))

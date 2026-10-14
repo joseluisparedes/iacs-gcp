@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
-from uuid import UUID, uuid4
+from typing import Any, Dict, Optional
+from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,9 +8,7 @@ from app.application.workflow_engine import WorkflowEngine
 from app.domain.models import WorkflowDefinition, WorkflowNodeRole, WorkflowTransition, WorkflowRoleAssignment, Profile
 from app.infrastructure.database import get_db
 from app.schemas.workflow import (
-    WorkflowDefinitionResponse,
     WorkflowTransitionResult,
-    WorkflowTransitionValidateRequest,
 )
 
 router = APIRouter()
@@ -319,7 +317,9 @@ async def update_workflow(id: str, payload: Dict[str, Any], db: AsyncSession = D
 
 
 @router.post("/definitions/{id}/publish")
-async def publish_workflow(id: str, payload: Dict[str, Any] = {}, db: AsyncSession = Depends(get_db)):
+async def publish_workflow(id: str, payload: Optional[Dict[str, Any]] = None, db: AsyncSession = Depends(get_db)):
+    if payload is None:
+        payload = {}
     try:
         wf_uuid = UUID(id)
     except ValueError:

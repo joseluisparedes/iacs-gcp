@@ -1,11 +1,11 @@
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
-from uuid import UUID, uuid4
+from typing import Any, Dict
+from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, delete, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.core.security import get_current_user_claims, require_role
-from app.domain.models import DocumentTemplate, Initiative, InitiativeStageRecord, Profile, StageConsent, StageForm
+from app.core.security import get_current_user_claims
+from app.domain.models import DocumentTemplate, InitiativeStageRecord, StageConsent, StageForm
 from app.infrastructure.database import get_db
 
 router = APIRouter()
@@ -47,11 +47,11 @@ async def get_stage_form(id: str, db: AsyncSession = Depends(get_db)):
         result = await db.execute(select(StageForm).where(StageForm.id == f_uuid))
     except ValueError:
         result = await db.execute(select(StageForm).where(StageForm.code == id))
-    
+
     form = result.scalar_one_or_none()
     if not form:
         raise HTTPException(status_code=404, detail="Formulario no encontrado")
-    
+
     return {
         "data": {
             "id": str(form.id),

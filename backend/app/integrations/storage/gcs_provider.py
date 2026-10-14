@@ -1,5 +1,4 @@
 import logging
-import os
 from pathlib import Path
 from typing import Optional
 from app.core.config import settings
@@ -61,7 +60,8 @@ class CloudStorageService(BaseStorageService):
         bucket_name: Optional[str] = None,
     ) -> bytes:
         if self.use_mock or not self._client:
-            target_file = self.local_path / file_path.lstrip("/uploads/")
+            clean_path = file_path.removeprefix("/uploads/").removeprefix("uploads/").removeprefix("/")
+            target_file = self.local_path / clean_path
             if not target_file.exists():
                 raise FileNotFoundError(f"Archivo no encontrado: {file_path}")
             with open(target_file, "rb") as f:
@@ -81,7 +81,8 @@ class CloudStorageService(BaseStorageService):
         bucket_name: Optional[str] = None,
     ) -> bool:
         if self.use_mock or not self._client:
-            target_file = self.local_path / file_path.lstrip("/uploads/")
+            clean_path = file_path.removeprefix("/uploads/").removeprefix("uploads/").removeprefix("/")
+            target_file = self.local_path / clean_path
             if target_file.exists():
                 target_file.unlink()
                 return True

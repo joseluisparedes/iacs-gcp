@@ -1,7 +1,21 @@
-import pytest
 import httpx
+import pytest
 
 BASE_URL = "http://127.0.0.1:8000"
+
+
+def is_server_reachable():
+    try:
+        r = httpx.get(f"{BASE_URL}/api/health", timeout=1.0)
+        return r.status_code == 200
+    except Exception:
+        return False
+
+
+pytestmark = pytest.mark.skipif(
+    not is_server_reachable(),
+    reason="Requiere el servidor backend activo en 127.0.0.1:8000 (pruebas e2e)",
+)
 
 @pytest.mark.asyncio
 async def test_initiatives_endpoint():

@@ -73,7 +73,7 @@ def parse_ai_json(raw: str) -> Optional[Dict[str, Any]]:
 class VertexAIService(BaseAIService):
     """
     Motor Empresarial Multi-Proveedor de Inteligencia Artificial para IACS.
-    
+
     Casacada de ejecución de alta disponibilidad:
     1. Azure OpenAI (GPT-5.1) - Motor Principal Corporativo
     2. Groq (Llama / OSS 120B) - Contingencia de Ultra Baja Latencia

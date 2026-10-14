@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.security import get_current_user_claims
@@ -48,7 +48,7 @@ async def create_initiative(
 ):
     """Crea una nueva iniciativa o borrador."""
     init_id = payload.id or f"init_{int(datetime.now().timestamp())}_{str(uuid4())[:8]}"
-    
+
     # Resolver usuario autor si existe
     user_id = None
     email = claims.get("email")
