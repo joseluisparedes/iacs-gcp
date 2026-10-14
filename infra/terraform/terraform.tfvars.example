@@ -1,0 +1,22 @@
+# ==============================================================================
+# IACS Enterprise — Ejemplo de Variables de Despliegue para Terraform
+# ==============================================================================
+
+project_id             = "iacs-enterprise-prod"
+region                 = "us-central1"
+environment            = "prod"
+
+# Máquina de Cloud SQL PostgreSQL 17 (Recomendado para Prod: db-custom-2-7680)
+db_tier                = "db-custom-2-7680"
+db_deletion_protection = true
+
+# URIs de las imágenes Docker compiladas por el pipeline de CI/CD
+backend_image          = "us-central1-docker.pkg.dev/iacs-enterprise-prod/iacs-prod-repo/backend:latest"
+frontend_image         = "us-central1-docker.pkg.dev/iacs-enterprise-prod/iacs-prod-repo/frontend:latest"
+
+# Modelo de Vertex AI
+vertex_ai_model        = "gemini-2.5-flash"
+
+# Invocación pública
+allow_unauthenticated  = true
+use_email_mock         = false

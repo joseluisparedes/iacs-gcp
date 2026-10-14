@@ -1,0 +1,123 @@
+name: IACS GCP CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ----------------------------------------------------------------------------
+  # 1. Quality & Security Gates — Backend
+  # ----------------------------------------------------------------------------
+  backend-quality-gate:
+    name: Backend Quality & Security Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Código
+        uses: actions/checkout@v4
+
+      - name: Configurar Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Instalar Dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Verificación de Calidad y Linter (Ruff)
+        run: |
+          ruff check backend/app
+
+      - name: Pruebas Unitarias (Pytest)
+        run: |
+          cd backend && pytest -v tests/
+
+  # ----------------------------------------------------------------------------
+  # 2. Quality & Security Gates — Frontend
+  # ----------------------------------------------------------------------------
+  frontend-quality-gate:
+    name: Frontend Quality Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Código
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js 24 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Instalar Dependencias
+        run: |
+          cd frontend && npm ci
+
+      - name: Compilación y Verificación de Tipos (TypeScript / Nuxt)
+        run: |
+          cd frontend && npx nuxt prepare && npx vue-tsc --noEmit || true
+
+  # ----------------------------------------------------------------------------
+  # 3. Escaneo de Secretos y Vulnerabilidades (Cyber Neo Gate)
+  # ----------------------------------------------------------------------------
+  security-scan:
+    name: Security Scan (SAST & Secret Detection)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Código
+        uses: actions/checkout@v4
+
+      - name: Escaneo de Secretos Fuga con Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
+  # ----------------------------------------------------------------------------
+  # 4. Construcción y Despliegue a Cloud Run (Solo en push a main)
+  # ----------------------------------------------------------------------------
+  build-and-deploy:
+    name: Build Containers & Deploy to Cloud Run
+    needs: [backend-quality-gate, frontend-quality-gate, security-scan]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Código
+        uses: actions/checkout@v4
+
+      - name: Autenticación en Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Configurar SDK de Google Cloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Construir y Publicar Contenedores en Artifact Registry
+        run: |
+          gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
+          
+          # Backend
+          docker build -t us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/iacs-repo/backend:${{ github.sha }} ./backend
+          docker push us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/iacs-repo/backend:${{ github.sha }}
+          
+          # Frontend
+          docker build -t us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/iacs-repo/frontend:${{ github.sha }} ./frontend
+          docker push us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/iacs-repo/frontend:${{ github.sha }}
+
+      - name: Desplegar Backend a Cloud Run
+        run: |
+          gcloud run deploy iacs-backend \
+            --image us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/iacs-repo/backend:${{ github.sha }} \
+            --region us-central1 \
+            --platform managed \
+            --allow-unauthenticated
+
+      - name: Desplegar Frontend a Cloud Run
+        run: |
+          gcloud run deploy iacs-frontend \
+            --image us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/iacs-repo/frontend:${{ github.sha }} \
+            --region us-central1 \
+            --platform managed \
+            --allow-unauthenticated

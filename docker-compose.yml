@@ -1,0 +1,99 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: iacs-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-iacs_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-iacs_secure_password_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-iacs_db}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-iacs_user} -d ${POSTGRES_DB:-iacs_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - iacs-network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: development
+    container_name: iacs-backend
+    restart: unless-stopped
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-local}
+      DEBUG: ${DEBUG:-true}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-iacs_user}:${POSTGRES_PASSWORD:-iacs_secure_password_dev}@postgres:5432/${POSTGRES_DB:-iacs_db}
+      SECRET_KEY: ${SECRET_KEY:-dev-secret-key-change-in-production-min-32-chars-long}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      USE_AUTH_MOCK: ${USE_AUTH_MOCK:-true}
+      USE_AI_MOCK: ${USE_AI_MOCK:-false}
+      USE_STORAGE_MOCK: ${USE_STORAGE_MOCK:-true}
+      USE_EMAIL_MOCK: ${USE_EMAIL_MOCK:-true}
+      GCP_PROJECT_ID: ${GCP_PROJECT_ID:-iacs-enterprise-prod}
+      GCP_LOCATION: ${GCP_LOCATION:-us-central1}
+      VERTEX_AI_MODEL: ${VERTEX_AI_MODEL:-gemini-3.8-flash}
+      AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT:-}
+      AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:-}
+      AZURE_OPENAI_DEPLOYMENT: ${AZURE_OPENAI_DEPLOYMENT:-}
+      AZURE_OPENAI_API_VERSION: ${AZURE_OPENAI_API_VERSION:-2024-12-01-preview}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      CORS_ORIGINS: '["http://localhost:3000","http://127.0.0.1:3000"]'
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+      - local_storage_data:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8000/api/health\")' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - iacs-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: development
+    container_name: iacs-frontend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      NUXT_PUBLIC_API_BASE: http://localhost:8000/api/v1
+      NUXT_PUBLIC_APP_NAME: "IACS Enterprise"
+      PORT: 3000
+      HOST: 0.0.0.0
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - iacs-network
+
+volumes:
+  postgres_data:
+    driver: local
+  local_storage_data:
+    driver: local
+
+networks:
+  iacs-network:
+    driver: bridge

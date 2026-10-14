@@ -1,0 +1,15 @@
+# ==============================================================================
+# Configuración del Backend Remoto de Terraform en Google Cloud Storage (GCS)
+# ==============================================================================
+# Para activar el backend remoto:
+# 1. Crea previamente un bucket en GCS (ej. gs://iacs-enterprise-prod-tfstate).
+# 2. Renombra este archivo a backend.tf.
+# 3. Ejecuta: terraform init -migrate-state
+# ==============================================================================
+
+# terraform {
+#   backend "gcs" {
+#     bucket = "iacs-enterprise-prod-tfstate"
+#     prefix = "terraform/state/prod"
+#   }
+# }
