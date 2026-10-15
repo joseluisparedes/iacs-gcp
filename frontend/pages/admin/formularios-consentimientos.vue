@@ -932,7 +932,8 @@
                         >
                           Conversación IA
                         </span>
-                      <div class="flex items-center gap-1.5 flex-wrap">
+                      </div>
+                      <div class="flex items-center gap-1.5 flex-wrap mt-0.5">
                         <span class="text-[10px] font-mono text-slate-400">
                           {{ field.key }} • {{ (field.type === 'multiselect' || field.allow_multiple) ? 'multiselect' : field.type }}
                         </span>
