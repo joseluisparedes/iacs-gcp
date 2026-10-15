@@ -640,9 +640,9 @@
                   class="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 focus:ring-2 focus:ring-[#4F5AF5]/20 focus:border-[#4F5AF5]"
                 />
 
-                <!-- Select -->
+                <!-- Select (Simple) -->
                 <select
-                  v-else-if="field.type === 'select'"
+                  v-else-if="field.type === 'select' && !field.allow_multiple"
                   v-model="liveFormData[field.key || field.id]"
                   class="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 focus:ring-2 focus:ring-[#4F5AF5]/20 focus:border-[#4F5AF5]"
                 >
@@ -653,7 +653,7 @@
                 </select>
 
                 <!-- MultiSelect / Chips -->
-                <div v-else-if="field.type === 'multiselect'" class="space-y-1.5">
+                <div v-else-if="field.type === 'multiselect' || field.allow_multiple" class="space-y-1.5">
                   <div class="flex flex-wrap gap-1.5">
                     <button
                       v-for="opt in (field.options || [])"
@@ -932,10 +932,17 @@
                         >
                           Conversación IA
                         </span>
+                      <div class="flex items-center gap-1.5 flex-wrap">
+                        <span class="text-[10px] font-mono text-slate-400">
+                          {{ field.key }} • {{ (field.type === 'multiselect' || field.allow_multiple) ? 'multiselect' : field.type }}
+                        </span>
+                        <span
+                          v-if="field.type === 'multiselect' || field.allow_multiple"
+                          class="text-[9px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 py-0.2 rounded"
+                        >
+                          Multiselección
+                        </span>
                       </div>
-                      <span class="text-[10px] font-mono text-slate-400">
-                        {{ field.key }} • {{ field.type }}
-                      </span>
                     </div>
                   </div>
 
@@ -1011,6 +1018,7 @@
                       </label>
                       <select
                         v-model="field.type"
+                        @change="handleFieldTypeChange(field)"
                         class="w-full px-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#4F5AF5]/20 focus:border-[#4F5AF5] cursor-pointer"
                       >
                         <option value="text">Texto corto (Input)</option>
@@ -1025,16 +1033,33 @@
                       </select>
                     </div>
 
-                    <div class="flex items-center gap-2 pt-5">
-                      <input
-                        type="checkbox"
-                        :id="`req_${idx}`"
-                        v-model="field.required"
-                        class="w-4 h-4 rounded-md text-[#4F5AF5] focus:ring-[#4F5AF5] cursor-pointer"
-                      />
-                      <label :for="`req_${idx}`" class="text-xs font-bold text-slate-700 cursor-pointer">
-                        Campo obligatorio para aprobar
-                      </label>
+                    <div class="flex flex-col gap-2 pt-2 sm:pt-4">
+                      <div class="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          :id="`req_${idx}`"
+                          v-model="field.required"
+                          class="w-4 h-4 rounded-md text-[#4F5AF5] focus:ring-[#4F5AF5] cursor-pointer"
+                        />
+                        <label :for="`req_${idx}`" class="text-xs font-bold text-slate-700 cursor-pointer">
+                          Campo obligatorio para aprobar
+                        </label>
+                      </div>
+
+                      <!-- Toggle Permitir Selecciones Múltiples -->
+                      <div v-if="field.type === 'select' || field.type === 'multiselect'" class="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          :id="`multi_${idx}`"
+                          :checked="field.type === 'multiselect' || field.allow_multiple === true"
+                          @change="toggleAllowMultiple(field, ($event.target as HTMLInputElement).checked)"
+                          class="w-4 h-4 rounded-md text-[#4F5AF5] focus:ring-[#4F5AF5] cursor-pointer"
+                        />
+                        <label :for="`multi_${idx}`" class="text-xs font-bold text-indigo-700 cursor-pointer flex items-center gap-1.5">
+                          <span>Permitir selecciones múltiples</span>
+                          <span class="text-[9px] font-bold px-1.5 py-0.2 bg-indigo-50 border border-indigo-200 rounded text-indigo-600">Multiselección</span>
+                        </label>
+                      </div>
                     </div>
 
                     <div class="sm:col-span-2 flex items-start gap-2 pt-3 border-t border-slate-100 mt-2">
@@ -1132,7 +1157,7 @@
 
                     <!-- Opciones Disponibles (Select / MultiSelect) -->
                     <div
-                      v-if="field.type === 'select' || field.type === 'multiselect'"
+                      v-if="field.type === 'select' || field.type === 'multiselect' || field.allow_multiple"
                       class="sm:col-span-2 p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-3"
                     >
                       <div class="flex items-center justify-between">
@@ -1140,9 +1165,17 @@
                           <ListPlus class="w-3.5 h-3.5 text-indigo-600" />
                           <span>Opciones Disponibles</span>
                         </label>
-                        <span class="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200">
-                          {{ (field.options || []).length }} {{ (field.options || []).length === 1 ? 'opción' : 'opciones' }}
-                        </span>
+                        <div class="flex items-center gap-1.5">
+                          <span
+                            class="text-[10px] font-bold px-2 py-0.5 rounded-full border"
+                            :class="(field.type === 'multiselect' || field.allow_multiple) ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-slate-100 text-slate-600 border-slate-200'"
+                          >
+                            {{ (field.type === 'multiselect' || field.allow_multiple) ? 'Selección Múltiple' : 'Selección Única' }}
+                          </span>
+                          <span class="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200">
+                            {{ (field.options || []).length }} {{ (field.options || []).length === 1 ? 'opción' : 'opciones' }}
+                          </span>
+                        </div>
                       </div>
 
                       <div class="flex gap-2">
@@ -1914,12 +1947,31 @@ const toggleMultiSelect = (fieldKey: string, option: string) => {
   }
 };
 
+const toggleAllowMultiple = (field: any, checked: boolean) => {
+  field.allow_multiple = checked;
+  if (checked) {
+    field.type = 'multiselect';
+  } else {
+    field.type = 'select';
+  }
+};
+
+const handleFieldTypeChange = (field: any) => {
+  if (field.type === 'multiselect') {
+    field.allow_multiple = true;
+  } else if (field.type === 'select' && field.allow_multiple) {
+    field.allow_multiple = false;
+  }
+};
+
 const testValidateForm = () => {
   if (!activePreviewForm.value) return;
   const missingFields: string[] = [];
   for (const field of activePreviewForm.value.fields || []) {
     const key = field.key || field.id;
-    if (field.required && !liveFormData.value[key]) {
+    const val = liveFormData.value[key];
+    const isEmpty = val === undefined || val === null || (typeof val === 'string' && val.trim() === '') || (Array.isArray(val) && val.length === 0);
+    if (field.required && isEmpty) {
       missingFields.push(field.label || key);
     }
   }

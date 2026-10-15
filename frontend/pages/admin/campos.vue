@@ -81,13 +81,14 @@ async function handleSave() {
   if (!form.value.label?.trim() || !form.value.key?.trim()) return;
   saving.value = true;
   try {
-    const opts = form.value.field_type === 'select'
+    const opts = (form.value.field_type === 'select' || form.value.field_type === 'multiselect')
       ? rawOptions.value.split(',').map(s => s.trim()).filter(Boolean)
       : [];
 
     const payload = {
       ...form.value,
       options: opts,
+      allow_multiple: Boolean(form.value.allow_multiple || form.value.field_type === 'multiselect'),
     };
 
     if (editingId.value) {
@@ -250,27 +251,38 @@ const typeBadges: Record<string, string> = {
             <label class="block text-[11px] font-bold text-slate-700 mb-1">Tipo de Dato</label>
             <select
               v-model="form.field_type"
+              @change="if (form.field_type === 'multiselect') form.allow_multiple = true; else if (form.field_type === 'select' && form.allow_multiple === undefined) form.allow_multiple = false;"
               class="w-full px-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#0D436C]"
             >
               <option value="text">Texto Libre</option>
               <option value="select">Selector (Dropdown)</option>
+              <option value="multiselect">Selección Múltiple (Chips / Tags)</option>
               <option value="date">Fecha (DD/MM/AAAA)</option>
               <option value="file">Archivo Adjunto</option>
             </select>
           </div>
-          <div class="flex items-center gap-4 pt-5">
-            <label class="flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer">
+          <div class="flex items-center gap-3 pt-5 flex-wrap">
+            <label class="flex items-center gap-1.5 text-xs font-semibold text-slate-700 cursor-pointer">
               <input type="checkbox" v-model="form.is_required" class="rounded text-[#0D436C]" />
               Obligatorio
             </label>
-            <label class="flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer">
+            <label class="flex items-center gap-1.5 text-xs font-semibold text-slate-700 cursor-pointer">
               <input type="checkbox" v-model="form.ask_in_initial_form" class="rounded text-[#0D436C]" />
               Form. Inicial
+            </label>
+            <label v-if="form.field_type === 'select' || form.field_type === 'multiselect'" class="flex items-center gap-1.5 text-xs font-bold text-indigo-700 cursor-pointer">
+              <input
+                type="checkbox"
+                :checked="form.field_type === 'multiselect' || form.allow_multiple === true"
+                @change="form.allow_multiple = ($event.target as HTMLInputElement).checked; form.field_type = form.allow_multiple ? 'multiselect' : 'select'"
+                class="rounded text-indigo-600"
+              />
+              Multiselección
             </label>
           </div>
         </div>
 
-        <div v-if="form.field_type === 'select'">
+        <div v-if="form.field_type === 'select' || form.field_type === 'multiselect'">
           <label class="block text-[11px] font-bold text-slate-700 mb-1">Opciones (separadas por coma)</label>
           <input
             v-model="rawOptions"

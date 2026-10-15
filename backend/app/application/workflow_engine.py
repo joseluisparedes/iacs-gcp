@@ -223,7 +223,14 @@ class WorkflowEngine:
         if curr_node and curr_node.get("data", {}).get("requiredFields"):
             required_fields.extend(curr_node.get("data", {}).get("requiredFields"))
 
-        missing = [f for f in set(required_fields) if not str(form_data.get(f, "")).strip()]
+        def is_empty(val: Any) -> bool:
+            if val is None:
+                return True
+            if isinstance(val, (list, dict, set, tuple)):
+                return len(val) == 0
+            return not str(val).strip()
+
+        missing = [f for f in set(required_fields) if is_empty(form_data.get(f))]
         if missing:
             return WorkflowTransitionResult(
                 allowed=False,

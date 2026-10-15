@@ -367,7 +367,7 @@ function formatDate(iso: string) {
           </h1>
 
           <p class="text-xs text-slate-500">
-            {{ initiative.form_data?.institucion || 'UPC' }} · {{ initiative.form_data?.vicepresidencia || 'Sin VP' }} · {{ initiative.form_data?.direccion || 'Sin Dirección' }}
+            {{ Array.isArray(initiative.form_data?.institucion) ? initiative.form_data.institucion.join(', ') : (initiative.form_data?.institucion || 'UPC') }} · {{ initiative.form_data?.vicepresidencia || 'Sin VP' }} · {{ initiative.form_data?.direccion || 'Sin Dirección' }}
           </p>
         </div>
 
@@ -533,7 +533,12 @@ function formatDate(iso: string) {
             <div class="grid grid-cols-2 gap-4 text-xs">
               <div class="p-3 bg-slate-50 rounded-xl">
                 <span class="text-slate-400 block text-[10px] uppercase font-bold">Institución</span>
-                <p class="text-slate-800 font-semibold text-sm mt-0.5">{{ initiative.form_data?.institucion || 'UPC' }}</p>
+                <div v-if="Array.isArray(initiative.form_data?.institucion)" class="flex flex-wrap gap-1 mt-1">
+                  <span v-for="inst in initiative.form_data.institucion" :key="inst" class="px-2 py-0.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded text-xs font-bold">
+                    {{ inst }}
+                  </span>
+                </div>
+                <p v-else class="text-slate-800 font-semibold text-sm mt-0.5">{{ initiative.form_data?.institucion || 'UPC' }}</p>
               </div>
               <div class="p-3 bg-slate-50 rounded-xl">
                 <span class="text-slate-400 block text-[10px] uppercase font-bold">Key User / Solicitante</span>

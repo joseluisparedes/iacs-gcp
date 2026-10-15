@@ -19,7 +19,7 @@ async def list_initiative_fields(db: AsyncSession = Depends(get_db)):
                 "id": f.get("id") or f"f_{f.get('key')}",
                 "label": f.get("label"),
                 "key": f.get("key"),
-                "field_type": "text" if f.get("type") == "textarea" else f.get("type", "text"),
+                "field_type": f.get("type", "text"),
                 "type": f.get("type", "text"),
                 "options": f.get("fileOptions") or f.get("options") or [],
                 "fileOptions": f.get("fileOptions") or None,
@@ -29,7 +29,7 @@ async def list_initiative_fields(db: AsyncSession = Depends(get_db)):
                 "section": "form",
                 "help_text": f.get("helpText") or f.get("placeholder") or f.get("help_text"),
                 "placeholder": f.get("placeholder"),
-                "allow_multiple": bool(f.get("allow_multiple")),
+                "allow_multiple": bool(f.get("allow_multiple") or f.get("type") == "multiselect"),
                 "ai_instructions": f.get("ai_instructions"),
                 "ask_in_initial_form": bool(f.get("ask_in_initial_form")),
             }

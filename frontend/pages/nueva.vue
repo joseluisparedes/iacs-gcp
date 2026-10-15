@@ -165,6 +165,29 @@ const submitMultiOptions = () => {
   sendMessage(combined);
 };
 
+const toggleFormFieldMulti = (key: string, opt: string) => {
+  if (!formData.value[key] || !Array.isArray(formData.value[key])) {
+    formData.value[key] = [];
+  }
+  const idx = formData.value[key].indexOf(opt);
+  if (idx > -1) {
+    formData.value[key].splice(idx, 1);
+  } else {
+    formData.value[key].push(opt);
+  }
+};
+
+const isFormFieldMultiSelected = (key: string, opt: string): boolean => {
+  const current = formData.value[key];
+  if (Array.isArray(current)) {
+    return current.includes(opt);
+  }
+  if (typeof current === 'string') {
+    return current.split(',').map(s => s.trim()).includes(opt);
+  }
+  return false;
+};
+
 const rateMessage = async (index: number, rating: 'positive' | 'negative') => {
   ratedMessages.value[index] = rating;
   try {
@@ -668,9 +691,57 @@ const handleSubmitToBPTI = async () => {
               </span>
             </label>
 
-            <!-- Select -->
+            <!-- MultiSelect (Chips / Selección Múltiple) -->
+            <div
+              v-if="field.field_type === 'multiselect' || field.allow_multiple || field.type === 'multiselect'"
+              class="space-y-2 bg-slate-50/70 p-3 rounded-xl border border-slate-200"
+            >
+              <div class="flex items-center justify-between text-xs text-slate-500">
+                <span class="font-medium text-[11px] text-slate-600">
+                  <span class="font-bold text-[#EB5F46]">{{ (formData[field.key] || []).length }}</span> seleccionada(s)
+                </span>
+                <div class="flex items-center gap-2">
+                  <button
+                    type="button"
+                    @click="formData[field.key] = [...(field.options || [])]"
+                    class="text-[11px] font-semibold text-indigo-600 hover:text-indigo-800 cursor-pointer"
+                  >
+                    Todas
+                  </button>
+                  <span class="text-slate-300">·</span>
+                  <button
+                    type="button"
+                    @click="formData[field.key] = []"
+                    class="text-[11px] font-semibold text-slate-400 hover:text-slate-600 cursor-pointer"
+                  >
+                    Limpiar
+                  </button>
+                </div>
+              </div>
+
+              <div class="flex flex-wrap gap-1.5">
+                <button
+                  v-for="opt in (field.options || [])"
+                  :key="opt"
+                  type="button"
+                  @click="toggleFormFieldMulti(field.key, opt)"
+                  :class="[
+                    'inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border font-medium transition-all cursor-pointer select-none',
+                    isFormFieldMultiSelected(field.key, opt)
+                      ? 'bg-[#EB5F46] text-white border-[#EB5F46] shadow-2xs font-semibold'
+                      : 'bg-white text-slate-700 border-slate-200 hover:border-slate-300 hover:bg-slate-100/50'
+                  ]"
+                >
+                  <Check v-if="isFormFieldMultiSelected(field.key, opt)" class="w-3.5 h-3.5 stroke-[3]" />
+                  <span v-else class="w-3 h-3 rounded-sm border border-slate-300 bg-white inline-block"></span>
+                  <span>{{ opt }}</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Select (Simple) -->
             <select
-              v-if="field.field_type === 'select'"
+              v-else-if="field.field_type === 'select' || field.type === 'select'"
               v-model="formData[field.key]"
               class="w-full border border-[#E2E8F0] hover:border-[#CBD5E1] bg-white rounded-xl px-3.5 py-2.5 text-sm text-[#1E293B] focus:outline-none focus:ring-2 focus:ring-[#EB5F46]/20 focus:border-[#EB5F46] transition-all cursor-pointer"
               :required="field.is_required"
@@ -1201,8 +1272,57 @@ const handleSubmitToBPTI = async () => {
             <label class="block text-xs font-semibold text-[#64748B] uppercase tracking-wider mb-1.5">
               {{ field.label }} <span v-if="field.is_required" class="text-red-500">*</span>
             </label>
+            <!-- MultiSelect (Chips / Selección Múltiple) -->
+            <div
+              v-if="field.field_type === 'multiselect' || field.allow_multiple || field.type === 'multiselect'"
+              class="space-y-2 bg-slate-50/70 p-3 rounded-xl border border-slate-200"
+            >
+              <div class="flex items-center justify-between text-xs text-slate-500">
+                <span class="font-medium text-[11px] text-slate-600">
+                  <span class="font-bold text-[#EB5F46]">{{ (formData[field.key] || []).length }}</span> seleccionada(s)
+                </span>
+                <div class="flex items-center gap-2">
+                  <button
+                    type="button"
+                    @click="formData[field.key] = [...(field.options || [])]"
+                    class="text-[11px] font-semibold text-indigo-600 hover:text-indigo-800 cursor-pointer"
+                  >
+                    Todas
+                  </button>
+                  <span class="text-slate-300">·</span>
+                  <button
+                    type="button"
+                    @click="formData[field.key] = []"
+                    class="text-[11px] font-semibold text-slate-400 hover:text-slate-600 cursor-pointer"
+                  >
+                    Limpiar
+                  </button>
+                </div>
+              </div>
+
+              <div class="flex flex-wrap gap-1.5">
+                <button
+                  v-for="opt in (field.options || [])"
+                  :key="opt"
+                  type="button"
+                  @click="toggleFormFieldMulti(field.key, opt)"
+                  :class="[
+                    'inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border font-medium transition-all cursor-pointer select-none',
+                    isFormFieldMultiSelected(field.key, opt)
+                      ? 'bg-[#EB5F46] text-white border-[#EB5F46] shadow-2xs font-semibold'
+                      : 'bg-white text-slate-700 border-slate-200 hover:border-slate-300 hover:bg-slate-100/50'
+                  ]"
+                >
+                  <Check v-if="isFormFieldMultiSelected(field.key, opt)" class="w-3.5 h-3.5 stroke-[3]" />
+                  <span v-else class="w-3 h-3 rounded-sm border border-slate-300 bg-white inline-block"></span>
+                  <span>{{ opt }}</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Select (Simple) -->
             <select
-              v-if="field.field_type === 'select'"
+              v-else-if="field.field_type === 'select' || field.type === 'select'"
               v-model="formData[field.key]"
               class="w-full border border-[#E2E8F0] focus:border-[#EB5F46] bg-white rounded-xl px-3.5 py-2.5 text-sm text-[#1E293B] outline-none cursor-pointer"
             >
