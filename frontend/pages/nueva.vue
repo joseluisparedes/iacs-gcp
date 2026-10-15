@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick } from "vue";
+import { ref, computed, onMounted, onUnmounted, nextTick } from "vue";
 import {
-  Check, CheckCircle2, Bot, ChevronRight, Pencil, Save, Send,
+  Check, CheckCircle2, Bot, ChevronRight, ChevronDown, Pencil, Save, Send,
   RotateCcw, ThumbsUp, ThumbsDown, Mic, MicOff, Paperclip, X,
   FileText, AlertCircle, Sparkles, Building2, User, HelpCircle,
   ArrowLeft, Eye, Download, Info, Image as ImageIcon, Volume2,
@@ -188,6 +188,19 @@ const isFormFieldMultiSelected = (key: string, opt: string): boolean => {
   return false;
 };
 
+const activeDropdownKey = ref<string | null>(null);
+
+const toggleDropdown = (key: string) => {
+  activeDropdownKey.value = activeDropdownKey.value === key ? null : key;
+};
+
+const closeDropdowns = (e: MouseEvent) => {
+  const target = e.target as HTMLElement;
+  if (!target?.closest?.('.multiselect-container')) {
+    activeDropdownKey.value = null;
+  }
+};
+
 const rateMessage = async (index: number, rating: 'positive' | 'negative') => {
   ratedMessages.value[index] = rating;
   try {
@@ -253,6 +266,16 @@ onMounted(async () => {
     }
   } catch (err) {
     console.error('Error fetching data in nueva.vue:', err);
+  }
+
+  if (typeof window !== 'undefined') {
+    window.addEventListener('click', closeDropdowns);
+  }
+});
+
+onUnmounted(() => {
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('click', closeDropdowns);
   }
 });
 
@@ -691,51 +714,127 @@ const handleSubmitToBPTI = async () => {
               </span>
             </label>
 
-            <!-- MultiSelect (Chips / Selección Múltiple) -->
+            <!-- MultiSelect (Dropdown Popover & Chips) -->
             <div
               v-if="field.field_type === 'multiselect' || field.allow_multiple || field.type === 'multiselect'"
-              class="space-y-2 bg-slate-50/70 p-3 rounded-xl border border-slate-200"
+              class="relative multiselect-container"
             >
-              <div class="flex items-center justify-between text-xs text-slate-500">
-                <span class="font-medium text-[11px] text-slate-600">
-                  <span class="font-bold text-[#EB5F46]">{{ (formData[field.key] || []).length }}</span> seleccionada(s)
-                </span>
-                <div class="flex items-center gap-2">
-                  <button
-                    type="button"
-                    @click="formData[field.key] = [...(field.options || [])]"
-                    class="text-[11px] font-semibold text-indigo-600 hover:text-indigo-800 cursor-pointer"
+              <!-- Trigger Input Box -->
+              <div
+                @click="toggleDropdown('step1_' + field.key)"
+                class="min-h-[44px] w-full border border-[#E2E8F0] hover:border-[#CBD5E1] bg-white rounded-xl px-3 py-2 text-sm text-[#1E293B] cursor-pointer transition-all flex items-center justify-between gap-2 shadow-2xs"
+                :class="{ 'ring-2 ring-[#EB5F46]/20 border-[#EB5F46]': activeDropdownKey === ('step1_' + field.key) }"
+              >
+                <!-- Selected badges or placeholder -->
+                <div class="flex flex-wrap items-center gap-1.5 flex-1 min-w-0">
+                  <span
+                    v-if="!formData[field.key] || formData[field.key].length === 0"
+                    class="text-[#94A3B8] text-sm select-none"
                   >
-                    Todas
-                  </button>
-                  <span class="text-slate-300">·</span>
+                    Seleccione una o más opciones...
+                  </span>
+                  <template v-else>
+                    <span
+                      v-for="opt in formData[field.key]"
+                      :key="opt"
+                      class="inline-flex items-center gap-1.5 bg-[#FFF1EE] text-[#EB5F46] border border-[#FCD9D2] font-medium text-xs px-2.5 py-1 rounded-lg select-none shadow-2xs"
+                    >
+                      <span class="truncate max-w-[200px]">{{ opt }}</span>
+                      <button
+                        type="button"
+                        @click.stop="toggleFormFieldMulti(field.key, opt)"
+                        class="hover:text-red-700 hover:bg-[#FCD9D2] rounded p-0.5 cursor-pointer transition-colors"
+                        title="Quitar"
+                      >
+                        <X class="w-3 h-3" />
+                      </button>
+                    </span>
+                  </template>
+                </div>
+
+                <!-- Right controls: clear all + divider + chevron -->
+                <div class="flex items-center gap-1.5 text-slate-400 shrink-0">
                   <button
+                    v-if="formData[field.key] && formData[field.key].length > 0"
                     type="button"
-                    @click="formData[field.key] = []"
-                    class="text-[11px] font-semibold text-slate-400 hover:text-slate-600 cursor-pointer"
+                    @click.stop="formData[field.key] = []"
+                    class="p-1 hover:text-slate-600 rounded-md cursor-pointer hover:bg-slate-100 transition-colors"
+                    title="Limpiar todo"
                   >
-                    Limpiar
+                    <X class="w-3.5 h-3.5" />
                   </button>
+                  <div
+                    v-if="formData[field.key] && formData[field.key].length > 0"
+                    class="w-px h-4 bg-slate-200"
+                  ></div>
+                  <ChevronDown
+                    class="w-4 h-4 transition-transform duration-200"
+                    :class="{ 'rotate-180 text-[#EB5F46]': activeDropdownKey === ('step1_' + field.key) }"
+                  />
                 </div>
               </div>
 
-              <div class="flex flex-wrap gap-1.5">
-                <button
-                  v-for="opt in (field.options || [])"
-                  :key="opt"
-                  type="button"
-                  @click="toggleFormFieldMulti(field.key, opt)"
-                  :class="[
-                    'inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border font-medium transition-all cursor-pointer select-none',
-                    isFormFieldMultiSelected(field.key, opt)
-                      ? 'bg-[#EB5F46] text-white border-[#EB5F46] shadow-2xs font-semibold'
-                      : 'bg-white text-slate-700 border-slate-200 hover:border-slate-300 hover:bg-slate-100/50'
-                  ]"
-                >
-                  <Check v-if="isFormFieldMultiSelected(field.key, opt)" class="w-3.5 h-3.5 stroke-[3]" />
-                  <span v-else class="w-3 h-3 rounded-sm border border-slate-300 bg-white inline-block"></span>
-                  <span>{{ opt }}</span>
-                </button>
+              <!-- Floating Dropdown Popover -->
+              <div
+                v-if="activeDropdownKey === ('step1_' + field.key)"
+                class="absolute left-0 right-0 top-full mt-1.5 bg-white border border-[#E2E8F0] rounded-xl shadow-xl z-50 overflow-hidden"
+              >
+                <!-- Header toolbar -->
+                <div class="px-3.5 py-2 bg-[#F8FAFC] border-b border-[#F1F5F9] flex items-center justify-between text-xs">
+                  <span class="text-slate-500 font-medium">
+                    <span class="font-bold text-[#EB5F46]">{{ (formData[field.key] || []).length }}</span> de {{ (field.options || []).length }} seleccionadas
+                  </span>
+                  <div class="flex items-center gap-2">
+                    <button
+                      type="button"
+                      @click.stop="formData[field.key] = (formData[field.key] || []).length === (field.options || []).length ? [] : [...(field.options || [])]"
+                      class="text-xs font-semibold text-[#EB5F46] hover:text-[#d44830] cursor-pointer"
+                    >
+                      {{ (formData[field.key] || []).length === (field.options || []).length ? 'Deseleccionar todas' : 'Seleccionar todas' }}
+                    </button>
+                    <span class="text-slate-300">·</span>
+                    <button
+                      type="button"
+                      @click.stop="formData[field.key] = []"
+                      class="text-slate-400 hover:text-slate-600 font-medium cursor-pointer"
+                    >
+                      Limpiar
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Options List -->
+                <div class="max-h-60 overflow-y-auto p-1.5 space-y-0.5 divide-y divide-[#F8FAFC]">
+                  <div
+                    v-for="opt in (field.options || [])"
+                    :key="opt"
+                    @click.stop="toggleFormFieldMulti(field.key, opt)"
+                    :class="[
+                      'flex items-center justify-between px-3 py-2 rounded-lg cursor-pointer transition-colors text-xs select-none',
+                      isFormFieldMultiSelected(field.key, opt)
+                        ? 'bg-[#FFF8F6] text-[#EB5F46] font-semibold'
+                        : 'text-[#334155] hover:bg-[#F8FAFC]'
+                    ]"
+                  >
+                    <div class="flex items-center gap-2.5 min-w-0">
+                      <div
+                        :class="[
+                          'w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors',
+                          isFormFieldMultiSelected(field.key, opt)
+                            ? 'bg-[#EB5F46] border-[#EB5F46] text-white'
+                            : 'border-slate-300 bg-white'
+                        ]"
+                      >
+                        <Check v-if="isFormFieldMultiSelected(field.key, opt)" class="w-3 h-3 stroke-[3]" />
+                      </div>
+                      <span class="truncate">{{ opt }}</span>
+                    </div>
+                    <Check v-if="isFormFieldMultiSelected(field.key, opt)" class="w-3.5 h-3.5 text-[#EB5F46] shrink-0 stroke-[2.5]" />
+                  </div>
+                  <div v-if="(!field.options || field.options.length === 0)" class="p-3 text-center text-xs text-slate-400">
+                    No hay opciones configuradas
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -1272,51 +1371,127 @@ const handleSubmitToBPTI = async () => {
             <label class="block text-xs font-semibold text-[#64748B] uppercase tracking-wider mb-1.5">
               {{ field.label }} <span v-if="field.is_required" class="text-red-500">*</span>
             </label>
-            <!-- MultiSelect (Chips / Selección Múltiple) -->
+            <!-- MultiSelect (Dropdown Popover & Chips) -->
             <div
               v-if="field.field_type === 'multiselect' || field.allow_multiple || field.type === 'multiselect'"
-              class="space-y-2 bg-slate-50/70 p-3 rounded-xl border border-slate-200"
+              class="relative multiselect-container"
             >
-              <div class="flex items-center justify-between text-xs text-slate-500">
-                <span class="font-medium text-[11px] text-slate-600">
-                  <span class="font-bold text-[#EB5F46]">{{ (formData[field.key] || []).length }}</span> seleccionada(s)
-                </span>
-                <div class="flex items-center gap-2">
-                  <button
-                    type="button"
-                    @click="formData[field.key] = [...(field.options || [])]"
-                    class="text-[11px] font-semibold text-indigo-600 hover:text-indigo-800 cursor-pointer"
+              <!-- Trigger Input Box -->
+              <div
+                @click="toggleDropdown('step3_' + field.key)"
+                class="min-h-[44px] w-full border border-[#E2E8F0] hover:border-[#CBD5E1] bg-white rounded-xl px-3 py-2 text-sm text-[#1E293B] cursor-pointer transition-all flex items-center justify-between gap-2 shadow-2xs"
+                :class="{ 'ring-2 ring-[#EB5F46]/20 border-[#EB5F46]': activeDropdownKey === ('step3_' + field.key) }"
+              >
+                <!-- Selected badges or placeholder -->
+                <div class="flex flex-wrap items-center gap-1.5 flex-1 min-w-0">
+                  <span
+                    v-if="!formData[field.key] || formData[field.key].length === 0"
+                    class="text-[#94A3B8] text-sm select-none"
                   >
-                    Todas
-                  </button>
-                  <span class="text-slate-300">·</span>
+                    Seleccione una o más opciones...
+                  </span>
+                  <template v-else>
+                    <span
+                      v-for="opt in formData[field.key]"
+                      :key="opt"
+                      class="inline-flex items-center gap-1.5 bg-[#FFF1EE] text-[#EB5F46] border border-[#FCD9D2] font-medium text-xs px-2.5 py-1 rounded-lg select-none shadow-2xs"
+                    >
+                      <span class="truncate max-w-[200px]">{{ opt }}</span>
+                      <button
+                        type="button"
+                        @click.stop="toggleFormFieldMulti(field.key, opt)"
+                        class="hover:text-red-700 hover:bg-[#FCD9D2] rounded p-0.5 cursor-pointer transition-colors"
+                        title="Quitar"
+                      >
+                        <X class="w-3 h-3" />
+                      </button>
+                    </span>
+                  </template>
+                </div>
+
+                <!-- Right controls: clear all + divider + chevron -->
+                <div class="flex items-center gap-1.5 text-slate-400 shrink-0">
                   <button
+                    v-if="formData[field.key] && formData[field.key].length > 0"
                     type="button"
-                    @click="formData[field.key] = []"
-                    class="text-[11px] font-semibold text-slate-400 hover:text-slate-600 cursor-pointer"
+                    @click.stop="formData[field.key] = []"
+                    class="p-1 hover:text-slate-600 rounded-md cursor-pointer hover:bg-slate-100 transition-colors"
+                    title="Limpiar todo"
                   >
-                    Limpiar
+                    <X class="w-3.5 h-3.5" />
                   </button>
+                  <div
+                    v-if="formData[field.key] && formData[field.key].length > 0"
+                    class="w-px h-4 bg-slate-200"
+                  ></div>
+                  <ChevronDown
+                    class="w-4 h-4 transition-transform duration-200"
+                    :class="{ 'rotate-180 text-[#EB5F46]': activeDropdownKey === ('step3_' + field.key) }"
+                  />
                 </div>
               </div>
 
-              <div class="flex flex-wrap gap-1.5">
-                <button
-                  v-for="opt in (field.options || [])"
-                  :key="opt"
-                  type="button"
-                  @click="toggleFormFieldMulti(field.key, opt)"
-                  :class="[
-                    'inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border font-medium transition-all cursor-pointer select-none',
-                    isFormFieldMultiSelected(field.key, opt)
-                      ? 'bg-[#EB5F46] text-white border-[#EB5F46] shadow-2xs font-semibold'
-                      : 'bg-white text-slate-700 border-slate-200 hover:border-slate-300 hover:bg-slate-100/50'
-                  ]"
-                >
-                  <Check v-if="isFormFieldMultiSelected(field.key, opt)" class="w-3.5 h-3.5 stroke-[3]" />
-                  <span v-else class="w-3 h-3 rounded-sm border border-slate-300 bg-white inline-block"></span>
-                  <span>{{ opt }}</span>
-                </button>
+              <!-- Floating Dropdown Popover -->
+              <div
+                v-if="activeDropdownKey === ('step3_' + field.key)"
+                class="absolute left-0 right-0 top-full mt-1.5 bg-white border border-[#E2E8F0] rounded-xl shadow-xl z-50 overflow-hidden"
+              >
+                <!-- Header toolbar -->
+                <div class="px-3.5 py-2 bg-[#F8FAFC] border-b border-[#F1F5F9] flex items-center justify-between text-xs">
+                  <span class="text-slate-500 font-medium">
+                    <span class="font-bold text-[#EB5F46]">{{ (formData[field.key] || []).length }}</span> de {{ (field.options || []).length }} seleccionadas
+                  </span>
+                  <div class="flex items-center gap-2">
+                    <button
+                      type="button"
+                      @click.stop="formData[field.key] = (formData[field.key] || []).length === (field.options || []).length ? [] : [...(field.options || [])]"
+                      class="text-xs font-semibold text-[#EB5F46] hover:text-[#d44830] cursor-pointer"
+                    >
+                      {{ (formData[field.key] || []).length === (field.options || []).length ? 'Deseleccionar todas' : 'Seleccionar todas' }}
+                    </button>
+                    <span class="text-slate-300">·</span>
+                    <button
+                      type="button"
+                      @click.stop="formData[field.key] = []"
+                      class="text-slate-400 hover:text-slate-600 font-medium cursor-pointer"
+                    >
+                      Limpiar
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Options List -->
+                <div class="max-h-60 overflow-y-auto p-1.5 space-y-0.5 divide-y divide-[#F8FAFC]">
+                  <div
+                    v-for="opt in (field.options || [])"
+                    :key="opt"
+                    @click.stop="toggleFormFieldMulti(field.key, opt)"
+                    :class="[
+                      'flex items-center justify-between px-3 py-2 rounded-lg cursor-pointer transition-colors text-xs select-none',
+                      isFormFieldMultiSelected(field.key, opt)
+                        ? 'bg-[#FFF8F6] text-[#EB5F46] font-semibold'
+                        : 'text-[#334155] hover:bg-[#F8FAFC]'
+                    ]"
+                  >
+                    <div class="flex items-center gap-2.5 min-w-0">
+                      <div
+                        :class="[
+                          'w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors',
+                          isFormFieldMultiSelected(field.key, opt)
+                            ? 'bg-[#EB5F46] border-[#EB5F46] text-white'
+                            : 'border-slate-300 bg-white'
+                        ]"
+                      >
+                        <Check v-if="isFormFieldMultiSelected(field.key, opt)" class="w-3 h-3 stroke-[3]" />
+                      </div>
+                      <span class="truncate">{{ opt }}</span>
+                    </div>
+                    <Check v-if="isFormFieldMultiSelected(field.key, opt)" class="w-3.5 h-3.5 text-[#EB5F46] shrink-0 stroke-[2.5]" />
+                  </div>
+                  <div v-if="(!field.options || field.options.length === 0)" class="p-3 text-center text-xs text-slate-400">
+                    No hay opciones configuradas
+                  </div>
+                </div>
               </div>
             </div>
 
