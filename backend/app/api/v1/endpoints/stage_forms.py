@@ -506,7 +506,24 @@ async def delete_document_template(id: str, db: AsyncSession = Depends(get_db)):
 # ── Initiative Stage Records (Cadena de Custodia & Dictámenes) ───────────────
 
 @router.get("/initiatives/{id}/stage-records")
-async def get_initiative_stage_records(id: str, db: AsyncSession = Depends(get_db)):
+async def get_initiative_stage_records(
+    id: str,
+    db: AsyncSession = Depends(get_db),
+    claims: Dict[str, Any] = Depends(get_current_user_claims),
+):
+    from app.domain.models import Initiative
+    from app.api.v1.endpoints.initiatives import is_initiative_draft, is_user_initiative_registrador, get_current_user_profile
+
+    init_res = await db.execute(select(Initiative).where(Initiative.id == id))
+    init = init_res.scalar_one_or_none()
+    if init and is_initiative_draft(init):
+        profile = await get_current_user_profile(db, claims)
+        if not is_user_initiative_registrador(init, claims, profile):
+            raise HTTPException(
+                status_code=403,
+                detail="Acceso denegado: Las iniciativas en estado borrador solo las puede visualizar el registrador de la misma."
+            )
+
     result = await db.execute(
         select(InitiativeStageRecord)
         .where(InitiativeStageRecord.initiative_id == id)

@@ -147,11 +147,13 @@ class WorkflowEngine:
                 None
             )
             if edge:
+                edge_data = edge.get("data", {})
                 transition = {
                     "target_node_id": edge.get("target"),
                     "label": edge.get("label", transition_label),
                     "condition_type": "always",
-                    "condition_config": {}
+                    "condition_config": edge_data.get("condition_config", {}),
+                    "allowed_roles": edge_data.get("allowed_roles") or edge.get("allowed_roles") or []
                 }
 
         # 2b. Buscar si el nodo conecta a una compuerta (Gateway)
@@ -173,11 +175,13 @@ class WorkflowEngine:
                 outgoing_edges = [e for e in edges if e.get("source") == intermediate_gateway]
                 for edge in outgoing_edges:
                     if evaluate_gateway_condition(gw_node, form_data, edge):
+                        edge_data = edge.get("data", {})
                         transition = {
                             "target_node_id": edge.get("target"),
                             "label": edge.get("label", transition_label),
                             "condition_type": "always",
-                            "condition_config": {}
+                            "condition_config": edge_data.get("condition_config", {}),
+                            "allowed_roles": edge_data.get("allowed_roles") or edge.get("allowed_roles") or []
                         }
                         break
 

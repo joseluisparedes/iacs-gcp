@@ -125,12 +125,24 @@ const toggleGroup = (groupName: string) => {
   expandedGroups.value[groupName] = !expandedGroups.value[groupName];
 };
 
-// Borradores / Chats pendientes
+// Borradores / Chats pendientes (Solo chats en curso que no llegaron a resumen)
 const drafts = ref<any[]>([]);
 const fetchDrafts = async () => {
   try {
-    const data: any[] = await $fetch(`${apiBase}/initiatives?status_filter=Borrador`);
-    drafts.value = data || [];
+    const data: any[] = await $fetch(`${apiBase}/initiatives`);
+    // REGLA: Las iniciativas en estado borrador solo las puede visualizar el registrador de la misma
+    drafts.value = (data || []).filter((init: any) => {
+      const isMine = Boolean(
+        (user.value.id && init.user_id === user.value.id) ||
+        (user.value.email && init.form_data?.registrador_email === user.value.email) ||
+        (user.value.name && (init.form_data?.registrador === user.value.name || init.form_data?.solicitante === user.value.name))
+      );
+      if (!isMine) return false;
+
+      const reachedSummary = init.form_data?._reached_summary === true;
+      const isChat = init.status === 'Chat' || (init.status === 'Borrador' && !reachedSummary);
+      return !reachedSummary && isChat;
+    });
   } catch (e) {
     drafts.value = [];
   }
@@ -143,6 +155,7 @@ onMounted(() => {
       try {
         const u = JSON.parse(savedUser);
         user.value = {
+          id: u.id || user.value.id,
           name: u.name || user.value.name,
           email: u.email || user.value.email,
           roles: u.roles || user.value.roles,
@@ -331,7 +344,7 @@ const handleLogout = () => {
                   :key="d.id"
                   class="group flex items-center justify-between p-2 rounded-lg hover:bg-[#f7f8fc] transition-colors border border-transparent hover:border-[#e4e6ea] mb-1"
                 >
-                  <NuxtLink :to="`/iniciativa/${d.id}`" @click="draftsOpen = false" class="flex-1 min-w-0 pr-2">
+                  <NuxtLink :to="`/nueva?id=${d.id}`" @click="draftsOpen = false" class="flex-1 min-w-0 pr-2">
                     <p class="text-sm font-semibold text-[#1a1a2e] truncate">
                       {{ d.form_data?.titulo || 'Chat en curso con Teo' }}
                     </p>

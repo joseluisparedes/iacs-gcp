@@ -137,6 +137,14 @@ const closeDropdowns = () => {
   openDropdown.value = null;
 };
 
+// Current user profile
+const currentUser = ref({
+  id: "admin-1",
+  name: "Administrador General",
+  email: "admin@iacs.empresa.com",
+  roles: ["admin"] as string[],
+});
+
 // ─── Load Data ───────────────────────────────────────────────────────────────
 const loadData = async () => {
   loading.value = true;
@@ -152,6 +160,14 @@ const loadData = async () => {
         if (i.status === "Chat pendiente") return false;
         const isBorrador = !i.status || i.status === "Borrador" || i.status === "1. Borrador" || i.current_node_id === "borrador";
         if (isBorrador) {
+          // REGLA: Las iniciativas en estado borrador solo las puede visualizar el registrador de la misma
+          const isMine = Boolean(
+            (currentUser.value.id && i.user_id === currentUser.value.id) ||
+            (currentUser.value.email && (i.form_data?.registrador_email === currentUser.value.email)) ||
+            (currentUser.value.name && (i.form_data?.registrador === currentUser.value.name || i.form_data?.solicitante === currentUser.value.name))
+          );
+          if (!isMine) return false;
+
           const reached = Boolean(i.form_data?._reached_summary);
           const hasSum = Boolean(i.summary && typeof i.summary === "object" && Object.keys(i.summary).length > 0 && (i.summary.titulo || i.summary.objetivo));
           if (!reached && !hasSum) return false;
@@ -169,6 +185,20 @@ const loadData = async () => {
 };
 
 onMounted(() => {
+  if (process.client) {
+    const saved = localStorage.getItem('iacs_user');
+    if (saved) {
+      try {
+        const u = JSON.parse(saved);
+        currentUser.value = {
+          id: u.id || currentUser.value.id,
+          name: u.name || currentUser.value.name,
+          email: u.email || currentUser.value.email,
+          roles: u.roles || [u.role || 'admin'],
+        };
+      } catch (e) {}
+    }
+  }
   loadData();
 });
 
@@ -1020,7 +1050,7 @@ const getMultiSelectDisplayText = (selected: string[], options: string[], placeh
                     Vista rápida
                   </button>
                   <NuxtLink
-                    :to="ini.status === 'Borrador' ? `/nueva/${ini.id}` : `/iniciativa/${ini.id}`"
+                    :to="ini.status === 'Borrador' ? `/nueva?id=${ini.id}` : `/iniciativa/${ini.id}`"
                     class="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[#4F5AF5] hover:bg-[#3F49E0] text-xs font-semibold text-white transition-colors cursor-pointer shadow-2xs"
                   >
                     {{ ini.status === 'Borrador' ? 'Editar' : 'Abrir' }}
@@ -1086,7 +1116,7 @@ const getMultiSelectDisplayText = (selected: string[], options: string[], placeh
                 </td>
                 <td class="px-4 py-3 text-right">
                   <NuxtLink
-                    :to="ini.status === 'Borrador' ? `/nueva/${ini.id}` : `/iniciativa/${ini.id}`"
+                    :to="ini.status === 'Borrador' ? `/nueva?id=${ini.id}` : `/iniciativa/${ini.id}`"
                     class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#4F5AF5] hover:bg-[#3F49E0] text-[11px] font-semibold text-white transition-colors"
                   >
                     Abrir
@@ -1236,7 +1266,7 @@ const getMultiSelectDisplayText = (selected: string[], options: string[], placeh
         <div class="px-6 py-4 border-t border-[#F1F5F9] bg-[#F8FAFC] flex items-center justify-between shrink-0">
           <p class="text-xs text-[#94A3B8]">Registrado el {{ formatDate(selectedInitiative.created_at) }}</p>
           <NuxtLink
-            :to="selectedInitiative.status === 'Borrador' ? `/nueva/${selectedInitiative.id}` : `/iniciativa/${selectedInitiative.id}`"
+            :to="selectedInitiative.status === 'Borrador' ? `/nueva?id=${selectedInitiative.id}` : `/iniciativa/${selectedInitiative.id}`"
             @click="selectedInitiative = null"
             class="flex items-center gap-2 bg-[#4F5AF5] hover:bg-[#3F49E0] text-white px-4 py-2 rounded-xl text-sm font-semibold transition-colors shadow-sm cursor-pointer"
           >

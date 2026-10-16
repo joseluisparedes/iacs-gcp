@@ -47,10 +47,29 @@ const customBg = computed(() => styleConfig.value.button_bg);
 const customColor = computed(() => styleConfig.value.button_color);
 const customTextColor = computed(() => styleConfig.value.label_color);
 
+// Reglas de color por tipo de estado destino / origen
+const isObservacionEdge = computed(() => {
+  const lbl = (props.label || '').toLowerCase();
+  const tgt = String(props.data?.target || '').toLowerCase();
+  const src = String(props.data?.source || '').toLowerCase();
+  const edgeId = (props.id || '').toLowerCase();
+  return lbl.includes('observa') || tgt === 'observada' || tgt.includes('node_observada') || edgeId.includes('-obs');
+});
+
+const isDesestimacionEdge = computed(() => {
+  const lbl = (props.label || '').toLowerCase();
+  const tgt = String(props.data?.target || '').toLowerCase();
+  const edgeId = (props.id || '').toLowerCase();
+  return lbl.includes('desestima') || tgt === 'desestimada' || tgt.includes('node_desestimada') || edgeId.includes('-desest');
+});
+
 const arrowColor = computed(() => {
   if (customColor.value) return customColor.value;
   if (props.selected) return '#4F5AF5';
-  return props.style?.stroke || '#94a3b8';
+  if (props.style?.stroke && props.style.stroke !== '#94a3b8') return props.style.stroke;
+  if (isObservacionEdge.value) return '#F59E0B'; // Ámbar de observación
+  if (isDesestimacionEdge.value) return '#EF4444'; // Rojo de desestimación
+  return '#94a3b8';
 });
 
 const handleChipClick = (e: MouseEvent) => {
@@ -124,9 +143,9 @@ const handleDelete = (e: MouseEvent) => {
       <div
         @click="handleChipClick"
         :style="{
-          backgroundColor: customBg || '#FFFFFF',
-          borderColor: customColor || (selected ? '#4F5AF5' : '#CBD5E1'),
-          color: customTextColor || (customColor || (selected ? '#4F5AF5' : '#334155')),
+          backgroundColor: customBg || (isObservacionEdge ? '#FFFDF0' : isDesestimacionEdge ? '#FEF2F2' : '#FFFFFF'),
+          borderColor: customColor || (selected ? '#4F5AF5' : isObservacionEdge ? '#FCD34D' : isDesestimacionEdge ? '#FECACA' : '#CBD5E1'),
+          color: customTextColor || (customColor || (selected ? '#4F5AF5' : isObservacionEdge ? '#92400E' : isDesestimacionEdge ? '#991B1B' : '#334155')),
         }"
         :class="[
           'flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold border shadow-xs transition-all cursor-pointer select-none group',

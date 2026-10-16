@@ -47,7 +47,7 @@ def get_current_user_claims(
             return {
                 "sub": "00000000-0000-0000-0000-000000000001",
                 "email": "admin@iacs.empresa.com",
-                "name": "Administrador IACS",
+                "name": "Administrador General",
                 "roles": ["admin"]
             }
         raise HTTPException(

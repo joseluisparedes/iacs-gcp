@@ -301,15 +301,11 @@ const toggleEdgeRole = (roleCode: string) => {
 // Color Presets para Flechas
 const applyColorPreset = (preset: any) => {
   if (!props.selectedEdge) return;
-  if (preset.isDefault) {
-    updateEdgeField('style_config', {});
-  } else {
-    updateEdgeField('style_config', {
-      button_bg: preset.bg,
-      button_color: preset.border,
-      label_color: preset.text,
-    });
-  }
+  updateEdgeField('style_config', {
+    button_bg: preset.bg,
+    button_color: preset.border,
+    label_color: preset.text,
+  });
 };
 
 const updateCustomColor = (colorKey: string, hexValue: string) => {
@@ -322,14 +318,19 @@ const updateCustomColor = (colorKey: string, hexValue: string) => {
 
 const resetEdgeStyle = () => {
   if (!props.selectedEdge) return;
-  updateEdgeField('style_config', {});
+  const def = COLOR_PRESETS.find(p => p.isDefault) || COLOR_PRESETS[0];
+  updateEdgeField('style_config', {
+    button_bg: def.bg,
+    button_color: def.border,
+    label_color: def.text,
+  });
 };
 
 const isPresetActive = (preset: any) => {
   const cfg = edgeData.value.style_config || {};
   const hasCustom = Boolean(cfg.button_bg || cfg.button_color || cfg.label_color);
-  if (preset.isDefault) return !hasCustom;
-  return cfg.button_color === preset.border && cfg.button_bg === preset.bg;
+  if (!hasCustom && preset.isDefault) return true;
+  return cfg.button_color === preset.border && (cfg.button_bg === preset.bg || (!cfg.button_bg && preset.bg === '#EB5F46'));
 };
 
 // Gateway Config Helpers

@@ -106,6 +106,13 @@ async def get_system_prompt_from_db(db: AsyncSession) -> str:
 4. **Validación Inicial Exclusiva**: Cuando el usuario plantee su necesidad por primera vez, tu ÚNICA tarea es reconocer brevemente su requerimiento en una frase empática, proponer el **Título de la iniciativa (propuesto)** y el **Objetivo principal (propuesto)** en negritas markdown, y consultar amablemente si está de acuerdo. NO formules preguntas sobre sistemas, fechas, alcance ni presupuesto en este primer mensaje. Las opciones deben ser estrictamente: ["Sí, estoy de acuerdo", "Quiero ajustarlo"].
 5. **Opciones Breves y Accionables**: Cada alternativa en 'options' debe ser una opción concisa de máximo 6 a 8 palabras.
 6. **Cierre sin Vacíos**: No añadas la etiqueta técnica '[INFORMACION_COMPLETA]' si quedan supuestos sin responder o campos obligatorios vacíos.
+7. **Soberanía y Criterio del Negocio (Human-in-the-Loop)**:
+   - La IA NUNCA inventa, asume ni define por su cuenta cifras, métricas ni decisiones del negocio (horas de ahorro, presupuesto, ROI, prioridades). El único dueño de la verdad operativa es el usuario humano.
+   - En 'options', está ESTRICTAMENTE PROHIBIDO generar opciones como "Prefiero que tú propongas el rango", "Decídelo tú" o que deleguen el juicio del negocio a la máquina.
+   - Si el usuario requiere apoyo para estimar, ofrece alternativas de facilitación metodológica: "Ayúdame con una fórmula de cálculo", "Dar un estimado aproximado", "No aplica ahorro de horas".
+8. **Cero Suposiciones No Validadas de Sistemas**:
+   - NUNCA asumas marcas o plataformas específicas (como Salesforce, Banner o SAP) a menos que el usuario las haya mencionado expresamente o aparezcan en el formulario/documento de sustento.
+   - Si requieres indagar por la integración, pregunta neutralmente por el rol del sistema (ej. "¿En qué CRM o sistema comercial residen hoy los prospectos?") en vez de dar por sentado un producto específico.
 """
 
     context_items = [c for c in configs if c.layer == "context"]

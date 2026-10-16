@@ -313,7 +313,10 @@ const loadActiveWorkflow = async () => {
         type: n.type || (n.id.startsWith('gw_') ? 'gateway' : n.id === 'ai_chat' ? 'ai_agent' : 'state'),
       }));
       edges.value = (graph.edges || []).map((e: any) => {
-        const edgeColor = e.data?.style_config?.button_color || '#4F5AF5';
+        const isObs = (e.target === 'observada' || (e.target || '').includes('obs') || (e.label || '').toLowerCase().includes('observa'));
+        const isDesest = (e.target === 'desestimada' || (e.target || '').includes('desest') || (e.label || '').toLowerCase().includes('desestima'));
+        const defaultColor = isObs ? '#F59E0B' : isDesest ? '#EF4444' : '#4F5AF5';
+        const edgeColor = e.data?.style_config?.button_color || defaultColor;
         return {
           ...e,
           type: 'workflow',
@@ -441,8 +444,9 @@ const handleConnect = (params: any) => {
       condition_type: 'always',
       label: 'Avanzar',
       style_config: {
-        button_color: '#4F5AF5',
-        button_text_color: '#ffffff',
+        button_bg: '#EB5F46',
+        button_color: '#EB5F46',
+        label_color: '#ffffff',
       },
     },
   };
@@ -477,7 +481,10 @@ const handleUpdateEdge = (payload: any) => {
       mergedData.label = payload.label;
     }
     edges.value[idx].data = mergedData;
-    const arrowColor = mergedData.style_config?.button_color || '#4F5AF5';
+    const isObs = (edges.value[idx].target === 'observada' || (edges.value[idx].target || '').includes('obs') || (edges.value[idx].label || '').toLowerCase().includes('observa'));
+    const isDesest = (edges.value[idx].target === 'desestimada' || (edges.value[idx].target || '').includes('desest') || (edges.value[idx].label || '').toLowerCase().includes('desestima'));
+    const defaultColor = isObs ? '#F59E0B' : isDesest ? '#EF4444' : '#4F5AF5';
+    const arrowColor = mergedData.style_config?.button_color || defaultColor;
     edges.value[idx].markerEnd = {
       type: MarkerType.ArrowClosed,
       color: arrowColor,

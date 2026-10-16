@@ -309,10 +309,10 @@ COMO LEAD ENTERPRISE ARCHITECT / BP TI, DEBES:
 1. Confirmar brevemente la alineación inicial en 1 sola frase.
 2. Queda ESTRICTAMENTE PROHIBIDO volver a proponer el título y objetivo.
 3. CUESTIONAR CON RIGOR EL ECOSISTEMA Y LA FUENTE DE VERDAD:
-   No te limites a preguntar '¿qué sistemas usas?'. Cuestiona la interacción técnica real entre las plataformas institucionales relevantes de la Base de Conocimiento (Banner, Salesforce, SAP, Blackboard Ultra, pasarelas de pago, etc.).
+   No te limites a preguntar '¿qué sistemas usas?'. Cuestiona la interacción técnica real entre las plataformas del área sin asumir marcas que el usuario no haya nombrado (como Salesforce o SAP). Pregunta por el rol de la plataforma (CRM, ERP, portal analítico, etc.).
    Formula el dilema técnico central: ¿dónde residirá la regla de negocio, cómo se sincronizarán los estados y cuál será la fuente de verdad?
-4. Plantea el dilema en 1-2 párrafos concisos y ofrece una alternativa recomendada bien justificada.
-5. En 'options', sugiere entre 2 y 4 alternativas técnicas directas y estratégicas.
+4. Plantea el dilema en 1-2 párrafos concisos y ofrece una alternativa técnica bien justificada.
+5. En 'options', sugiere entre 2 y 4 alternativas técnicas directas y estratégicas. Queda ESTRICTAMENTE PROHIBIDO generar opciones como 'Prefiero que tú propongas el rango', 'Decídelo tú' o que deleguen decisiones y criterios de negocio a la IA.
 """
         else:
             session_directive = """

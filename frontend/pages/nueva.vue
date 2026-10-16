@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, nextTick } from "vue";
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from "vue";
 import {
   Check, CheckCircle2, Bot, ChevronRight, ChevronDown, Pencil, Save, Send,
   RotateCcw, ThumbsUp, ThumbsDown, Mic, MicOff, Paperclip, X,
@@ -14,8 +14,90 @@ import { formatMarkdownToHtml, formatHtmlText } from '~/utils/formatHtml';
 const config = useRuntimeConfig();
 const apiBase = config.public.apiBase;
 const router = useRouter();
+const route = useRoute();
+const currentInitiativeId = ref<string | null>((route.query.id as string) || null);
 const { showLoader, hideLoader } = useGlobalLoader();
 const { aiName, aiAvatar, loadAiConfig } = useAiAssistant();
+
+// ─── Flujo de Trabajo Activo y Roles de Usuario (Flechas Conectadas = Botones Ejecutores) ───
+const { data: activeWorkflowData } = await useFetch<any>(`${apiBase}/workflow/active`);
+const activeWorkflow = computed(() => activeWorkflowData.value?.data);
+
+const currentUser = ref({
+  email: 'admin@iacs.empresa.com',
+  roles: ['admin', 'registrador'] as string[],
+});
+
+const userRolesList = computed(() => currentUser.value.roles.map((r: string) => r.toLowerCase()));
+const isAdmin = computed(() => userRolesList.value.includes('admin') || userRolesList.value.includes('administrador'));
+
+const ROLE_ALIASES: Record<string, string[]> = {
+  'registrador': ['registrador', 'key_user', 'key user'],
+  'key_user': ['registrador', 'key_user', 'key user'],
+  'bp_ti': ['bp_ti', 'business_partner', 'bp'],
+  'business_owner': ['business_owner', 'bo'],
+  'vicepresidente_del_negocio': ['vicepresidente', 'vicepresidente_del_negocio', 'vp'],
+  'gestor_de_la_demanda': ['gestor_demanda', 'gestor_de_la_demanda'],
+  'lider_de_dominio': ['lider_dominio', 'lider_de_dominio'],
+  'admin': ['admin', 'administrador', 'administrador general'],
+};
+
+// ─── Nodo Borrador y Flechas Salientes Conectadas ────────────────────────────
+const currentDraftNode = computed(() => {
+  if (!activeWorkflow.value?.graph_json?.nodes) return null;
+  const nodes = activeWorkflow.value.graph_json.nodes;
+  return nodes.find((n: any) => n.id === 'borrador')
+    || nodes.find((n: any) => /borrador/i.test(n.data?.label || '') || n.data?.stateSubtype === 'borrador')
+    || nodes.find((n: any) => n.type === 'state')
+    || null;
+});
+
+const outgoingEdges = computed(() => {
+  if (!activeWorkflow.value?.graph_json?.edges || !currentDraftNode.value) return [];
+  const nodeId = currentDraftNode.value.id;
+  return activeWorkflow.value.graph_json.edges.filter((e: any) => e.source === nodeId);
+});
+
+const canUserExecuteEdge = (edge: any) => {
+  if (isAdmin.value) return true;
+  const edgeData = edge.data || {};
+  const condCfg = edge.condition_config || {};
+  const allowed: string[] = edgeData.allowed_roles || edge.allowed_roles || condCfg.allowed_roles;
+  if (!Array.isArray(allowed) || allowed.length === 0) return true;
+
+  const userRolesExpanded = new Set<string>();
+  userRolesList.value.forEach((r: string) => {
+    userRolesExpanded.add(r);
+    (ROLE_ALIASES[r] || []).forEach(alias => userRolesExpanded.add(alias));
+  });
+
+  return allowed.some((allowedRole: string) => {
+    const normalized = allowedRole.toLowerCase();
+    if (userRolesExpanded.has(normalized)) return true;
+    const aliases = ROLE_ALIASES[normalized] || [];
+    return aliases.some(a => userRolesExpanded.has(a));
+  });
+};
+
+const userOutgoingEdges = computed(() => {
+  return outgoingEdges.value.filter((edge: any) => canUserExecuteEdge(edge));
+});
+
+// ─── Helpers de Botones Ejecutores (Etiqueta, Color y Estilos) ──────────────
+const getEdgeButtonLabel = (edge: any) => {
+  if (edge.label && edge.label.trim()) return edge.label.trim();
+  const targetNode = activeWorkflow.value?.graph_json?.nodes?.find((n: any) => n.id === edge.target);
+  return targetNode?.data?.action_label || targetNode?.data?.label || 'Avanzar';
+};
+
+const getEdgeButtonStyle = (edge: any) => {
+  const style = edge.data?.style_config || {};
+  return {
+    backgroundColor: style.button_bg || (style.button_color ? 'transparent' : '#EB5F46'),
+    borderColor: style.button_color || '#EB5F46',
+    color: style.label_color || '#FFFFFF',
+  };
+};
 
 // ─── 7 Stages Workflow Timeline (Solo visible en Paso 3 de revisión) ──────────
 const WORKFLOW_STAGES_TIMELINE = [
@@ -56,9 +138,81 @@ const filteredDirecciones = computed(() => {
 });
 
 // File attachment state
+interface AttachedEvidence {
+  name: string;
+  size: number;
+  content?: string;
+  source?: string;
+  uploadedAt?: string;
+}
+
 const fileInputRef = ref<HTMLInputElement | null>(null);
-const attachedFile = ref<{ name: string; size: number; content?: string } | null>(null);
+const step3FileInputRef = ref<HTMLInputElement | null>(null);
+const attachedFiles = ref<AttachedEvidence[]>([]);
+const attachedFile = ref<AttachedEvidence | null>(null);
 const isUploadingFile = ref(false);
+
+const previewModalFile = ref<AttachedEvidence | null>(null);
+const showPreviewModal = ref(false);
+
+const openPreviewFile = (file: AttachedEvidence) => {
+  previewModalFile.value = file;
+  showPreviewModal.value = true;
+};
+
+const downloadFile = (file: AttachedEvidence | null) => {
+  if (!file) return;
+  let content = file.content;
+  let mimeType = 'text/plain;charset=utf-8';
+
+  if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
+    mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  } else if (file.name.endsWith('.docx') || file.name.endsWith('.doc')) {
+    mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+  } else if (file.name.endsWith('.pdf')) {
+    mimeType = 'application/pdf';
+  }
+
+  if (!content) {
+    content = `========================================================================\n` +
+      `EXPEDIENTE DIGITAL DE SUSTENTO - IACS GCP\n` +
+      `========================================================================\n` +
+      `Iniciativa ID: ${currentInitiativeId.value || 'INIT-20261015-080016'}\n` +
+      `Archivo Adjunto: ${file.name}\n` +
+      `Procedencia: ${file.source || 'Sustento de la iniciativa'}\n` +
+      `Tamaño Registrado: ${file.size ? (file.size / 1024).toFixed(0) + ' KB' : '140 KB'}\n` +
+      `Fecha de Registro: ${file.uploadedAt || new Date().toLocaleString()}\n` +
+      `Gobernanza TI: Indexado y verificado por el Asistente Teo.\n` +
+      `========================================================================\n\n` +
+      `Detalle del Contenido y Mapeo Técnico:\n` +
+      `1. Especificaciones de integración y reglas de negocio para la plataforma.\n` +
+      `2. Entidades de datos y campos mapeados para la trazabilidad operativa.\n` +
+      `3. Validez de la evidencia técnica registrada en la cadena de custodia de IACS.\n`;
+  }
+
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = file.name;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};
+
+const removeAttachedFile = (index: number) => {
+  if (index >= 0 && index < attachedFiles.value.length) {
+    const removed = attachedFiles.value.splice(index, 1)[0];
+    if (attachedFile.value && attachedFile.value.name === removed.name) {
+      attachedFile.value = attachedFiles.value.length > 0 ? attachedFiles.value[attachedFiles.value.length - 1] : null;
+    }
+    formData.value.adjuntos_sustento = attachedFiles.value.map(f => ({ name: f.name, size: f.size, source: f.source }));
+    if (attachedFiles.value.length === 0) {
+      formData.value.attached_file = null;
+    }
+  }
+};
 
 const handleFileUpload = async (e: Event) => {
   const target = e.target as HTMLInputElement;
@@ -71,11 +225,27 @@ const handleFileUpload = async (e: Event) => {
   }
 
   isUploadingFile.value = true;
-  attachedFile.value = {
+  const sourceName = currentStep.value === 1 
+    ? 'Paso 1 - Formulario' 
+    : (currentStep.value === 2 ? 'Chat interactivo con Teo' : 'Ficha de sustento');
+
+  const newEvidence: AttachedEvidence = {
     name: file.name,
     size: file.size,
     content: '',
+    source: sourceName,
+    uploadedAt: new Date().toISOString(),
   };
+
+  attachedFile.value = newEvidence;
+
+  // Agregar o actualizar en la lista acumulada de evidencias
+  const existingIdx = attachedFiles.value.findIndex(f => f.name === newEvidence.name);
+  if (existingIdx >= 0) {
+    attachedFiles.value[existingIdx] = newEvidence;
+  } else {
+    attachedFiles.value.push(newEvidence);
+  }
 
   try {
     const fd = new FormData();
@@ -85,16 +255,22 @@ const handleFileUpload = async (e: Event) => {
       body: fd,
     });
     if (res && (res.content || res.text)) {
-      attachedFile.value = {
-        name: file.name,
-        size: file.size,
-        content: res.content || res.text,
-      };
+      newEvidence.content = res.content || res.text;
     }
+    formData.value.attached_file = {
+      name: file.name,
+      size: file.size,
+    };
+    formData.value.adjuntos_sustento = attachedFiles.value.map(f => ({
+      name: f.name,
+      size: f.size,
+      source: f.source,
+    }));
   } catch (err) {
     console.error("Error al extraer texto del documento adjunto:", err);
   } finally {
     isUploadingFile.value = false;
+    if (target) target.value = '';
   }
 };
 
@@ -238,7 +414,7 @@ const dynamicStep1Fields = computed(() => {
 
 const dynamicStep3Fields = computed(() => {
   return allFields.value.filter(f => 
-    !['vicepresidencia', 'direccion', 'registrador', 'solicitante', 'adjuntos_sustento', 'titulo', 'objetivo', 'descripcion_de_la_necesidad', 'bp_ti_sugerido'].includes(f.key)
+    !['vicepresidencia', 'direccion', 'registrador', 'solicitante', 'adjuntos_sustento', 'titulo', 'objetivo', 'objetivo_estrategico', 'descripcion_de_la_necesidad', 'descripcion_necesidad', 'bp_ti_sugerido'].includes(f.key)
   );
 });
 
@@ -246,8 +422,189 @@ const dynamicStep3Fields = computed(() => {
 const disclaimerAccepted = ref(false);
 const isSubmitting = ref(false);
 
+const getParamId = (): string | null => {
+  if (route.query.id) return String(route.query.id);
+  if (route.params.id) return String(route.params.id);
+  if (typeof window !== 'undefined') {
+    const searchParams = new URLSearchParams(window.location.search);
+    if (searchParams.get('id')) return searchParams.get('id');
+    const pathParts = window.location.pathname.split('/');
+    if (pathParts[1] === 'nueva' && pathParts[2]) return pathParts[2];
+  }
+  return null;
+};
+
+const loadInitiativeData = async (id: string) => {
+  if (!id) return;
+  currentInitiativeId.value = id;
+  try {
+    const initData: any = await $fetch(`${apiBase}/initiatives/${id}`);
+    if (initData) {
+      if (initData.form_data) {
+        formData.value = { ...formData.value, ...initData.form_data };
+      }
+      if (initData.summary && typeof initData.summary === 'object') {
+        if (initData.summary.titulo && !formData.value.titulo) formData.value.titulo = initData.summary.titulo;
+        if (initData.summary.objetivo && !formData.value.objetivo) formData.value.objetivo = initData.summary.objetivo;
+        if (initData.summary.descripcionProblema && !formData.value.descripcion_de_la_necesidad) {
+          formData.value.descripcion_de_la_necesidad = initData.summary.descripcionProblema;
+        }
+      }
+      if (initData.title && !formData.value.titulo) formData.value.titulo = initData.title;
+      if (initData.objective && !formData.value.objetivo) formData.value.objetivo = initData.objective;
+      if (initData.description && !formData.value.descripcion_de_la_necesidad) {
+        formData.value.descripcion_de_la_necesidad = initData.description;
+      }
+
+      // Sincronizar alias de campos para evitar discrepancias
+      if (formData.value.objetivo && !formData.value.objetivo_estrategico) {
+        formData.value.objetivo_estrategico = formData.value.objetivo;
+      }
+      if (formData.value.objetivo_estrategico && !formData.value.objetivo) {
+        formData.value.objetivo = formData.value.objetivo_estrategico;
+      }
+      if (formData.value.descripcion_de_la_necesidad && !formData.value.descripcion_necesidad) {
+        formData.value.descripcion_necesidad = formData.value.descripcion_de_la_necesidad;
+      }
+      if (formData.value.descripcion_necesidad && !formData.value.descripcion_de_la_necesidad) {
+        formData.value.descripcion_de_la_necesidad = formData.value.descripcion_necesidad;
+      }
+
+      // Normalizar campos multiselect a arreglos para evitar desincronización de componentes
+      if (formData.value.institucion && typeof formData.value.institucion === 'string') {
+        formData.value.institucion = formData.value.institucion.includes(',')
+          ? formData.value.institucion.split(',').map((s: string) => s.trim()).filter(Boolean)
+          : [formData.value.institucion.trim()];
+      }
+      if (formData.value.sistemas_afectados && typeof formData.value.sistemas_afectados === 'string') {
+        formData.value.sistemas_afectados = formData.value.sistemas_afectados.includes(',')
+          ? formData.value.sistemas_afectados.split(',').map((s: string) => s.trim()).filter(Boolean)
+          : [formData.value.sistemas_afectados.trim()];
+      }
+
+      // Restaurar archivos de sustento y evidencias adjuntos (acumulando de form_data y chat_history)
+      const restoredFiles: AttachedEvidence[] = [];
+
+      // 1. Restaurar desde adjuntos_sustento en form_data (si es arreglo o único objeto)
+      if (Array.isArray(initData.form_data?.adjuntos_sustento)) {
+        for (const item of initData.form_data.adjuntos_sustento) {
+          if (typeof item === 'object' && item?.name) {
+            restoredFiles.push({
+              name: item.name,
+              size: item.size || 142336,
+              source: item.source || 'Paso 1 - Formulario',
+              uploadedAt: item.uploadedAt,
+            });
+          } else if (typeof item === 'string' && item.trim()) {
+            restoredFiles.push({
+              name: item.trim(),
+              size: 142336,
+              source: 'Paso 1 - Formulario',
+            });
+          }
+        }
+      } else if (initData.form_data?.adjuntos_sustento && typeof initData.form_data.adjuntos_sustento === 'object') {
+        restoredFiles.push({
+          name: initData.form_data.adjuntos_sustento.name || 'Archivo de sustento',
+          size: initData.form_data.adjuntos_sustento.size || 142336,
+          source: initData.form_data.adjuntos_sustento.source || 'Paso 1 - Formulario',
+        });
+      } else if (typeof initData.form_data?.adjuntos_sustento === 'string' && initData.form_data.adjuntos_sustento.trim()) {
+        restoredFiles.push({
+          name: initData.form_data.adjuntos_sustento.trim(),
+          size: 142336,
+          source: 'Paso 1 - Formulario',
+        });
+      }
+
+      // 2. Restaurar desde attached_file si existiera y no estuviera en la lista
+      if (initData.form_data?.attached_file) {
+        const af = initData.form_data.attached_file;
+        const name = typeof af === 'object' ? af.name : String(af);
+        const size = typeof af === 'object' ? (af.size || 142336) : 142336;
+        if (name && !restoredFiles.some(f => f.name === name)) {
+          restoredFiles.push({ name, size, source: 'Paso 1 - Formulario' });
+        }
+      }
+
+      // 3. Escanear chat_history para detectar archivos subidos durante la conversación con Teo
+      if (initData.chat_history && Array.isArray(initData.chat_history)) {
+        chatHistory.value = initData.chat_history;
+        for (const msg of initData.chat_history) {
+          if (typeof msg?.text === 'string') {
+            const matches = msg.text.matchAll(/\[(?:Adjunto|El usuario adjuntó el archivo):\s*([^\]\n]+)\]/g);
+            for (const m of matches) {
+              const fileName = m[1].trim();
+              if (fileName && !restoredFiles.some(f => f.name === fileName)) {
+                restoredFiles.push({
+                  name: fileName,
+                  size: 142336,
+                  source: 'Chat interactivo con Teo',
+                });
+              }
+            }
+          }
+        }
+      }
+
+      attachedFiles.value = restoredFiles;
+      if (restoredFiles.length > 0) {
+        attachedFile.value = restoredFiles[restoredFiles.length - 1];
+      }
+
+      const reached = Boolean(initData.form_data?._reached_summary);
+      const isBorrador = initData.status === 'Borrador' || initData.status === '1. Borrador';
+
+      if (reached || isBorrador) {
+        currentStep.value = 3;
+      } else if (chatHistory.value.length > 0) {
+        currentStep.value = 2;
+      } else {
+        currentStep.value = 1;
+      }
+    }
+  } catch (e: any) {
+    console.warn('No se pudo restaurar la iniciativa:', e);
+    if (e?.status === 403 || e?.statusCode === 403) {
+      alert('Acceso denegado: Las iniciativas en estado borrador solo las puede visualizar el registrador de la misma.');
+      router.push('/bandeja');
+    }
+  }
+};
+
+watch(() => formData.value.objetivo, (val) => {
+  if (val) formData.value.objetivo_estrategico = val;
+});
+watch(() => formData.value.descripcion_de_la_necesidad, (val) => {
+  if (val) formData.value.descripcion_necesidad = val;
+});
+
+watch(() => route.query.id, (newId) => {
+  if (newId) {
+    loadInitiativeData(String(newId));
+  }
+});
+
 // ─── Carga de Estructura Organizacional y Metadatos de Formulario ────────────
 onMounted(async () => {
+  if (process.client) {
+    const saved = localStorage.getItem('iacs_user');
+    if (saved) {
+      try {
+        const u = JSON.parse(saved);
+        currentUser.value = {
+          email: u.email || currentUser.value.email,
+          roles: (u.roles && u.roles.length > 0) ? u.roles : (u.role ? [u.role] : ['admin', 'registrador']),
+        };
+        if (u.name && (!formData.value.registrador || formData.value.registrador === 'Administrador General')) {
+          formData.value.registrador = u.name;
+        }
+        if (u.email) {
+          formData.value.registrador_email = u.email;
+        }
+      } catch (e) {}
+    }
+  }
   loadAiConfig();
   try {
     const [vpRes, dirRes, fieldsRes, consentRes] = await Promise.all([
@@ -263,6 +620,12 @@ onMounted(async () => {
     }
     if (consentRes?.data?.statement) {
       consentStatement.value = consentRes.data.statement;
+    }
+
+    // Restaurar iniciativa si viene por parámetro (ej. desde Chats pendientes o Bandeja)
+    const idToLoad = getParamId();
+    if (idToLoad) {
+      await loadInitiativeData(idToLoad);
     }
   } catch (err) {
     console.error('Error fetching data in nueva.vue:', err);
@@ -358,6 +721,15 @@ const sendMessage = async (overrideText?: string) => {
   // Construir mensaje enviado a la IA (con contenido o indicación del adjunto)
   let aiMessage = textToSend;
   if (currentAttached) {
+    // Asegurar que el archivo quede registrado en la lista acumulada de evidencias
+    const existingIdx = attachedFiles.value.findIndex(f => f.name === currentAttached.name);
+    if (existingIdx === -1) {
+      attachedFiles.value.push({
+        ...currentAttached,
+        source: currentAttached.source || 'Chat interactivo con Teo',
+      });
+    }
+
     if (currentAttached.content) {
       aiMessage = `[El usuario adjuntó el archivo: ${currentAttached.name}]\n---\n${currentAttached.content}\n---\n${aiMessage ? 'Mensaje del usuario: ' + aiMessage : 'Por favor analiza a fondo este documento técnico y funcional de la iniciativa, extrae el título propuesto y el objetivo principal, y preséntamelos para su validación.'}`;
     } else {
@@ -421,6 +793,31 @@ const sendMessage = async (overrideText?: string) => {
       }
       Object.assign(formData.value, res.extractedFields);
     }
+
+    // Auto-guardado en segundo plano como chat en curso (solo si aún no llegó a resumen)
+    if (chatHistory.value.length >= 2) {
+      $fetch(`${apiBase}/initiatives/draft`, {
+        method: 'POST',
+        body: {
+          id: currentInitiativeId.value || undefined,
+          status: 'Chat',
+          form_data: {
+            ...formData.value,
+            adjuntos_sustento: attachedFiles.value.map(f => ({ name: f.name, size: f.size, source: f.source })),
+            _reached_summary: false,
+          },
+          summary: {
+            titulo: formData.value.titulo || 'Chat en curso con Teo',
+            objetivo: formData.value.objetivo || '',
+          },
+          chat_history: chatHistory.value.map(h => ({ role: h.role, text: h.text })),
+        },
+      }).then((draftRes: any) => {
+        if (draftRes?.id && !currentInitiativeId.value) {
+          currentInitiativeId.value = draftRes.id;
+        }
+      }).catch(() => null);
+    }
   } catch (err) {
     console.error('Error in chat:', err);
     chatHistory.value.push({
@@ -436,6 +833,20 @@ const sendMessage = async (overrideText?: string) => {
       chatEndRef.value?.scrollIntoView({ behavior: 'smooth' });
     });
   }
+};
+
+const getPayloadFormData = () => {
+  return {
+    ...formData.value,
+    attached_file: attachedFiles.value[0] ? { name: attachedFiles.value[0].name, size: attachedFiles.value[0].size } : null,
+    adjuntos_sustento: attachedFiles.value.map(f => ({
+      name: f.name,
+      size: f.size,
+      source: f.source || 'Evidencia adjunta',
+      uploadedAt: f.uploadedAt,
+    })),
+    _reached_summary: true,
+  };
 };
 
 const goToStep3Summary = async () => {
@@ -490,6 +901,32 @@ const goToStep3Summary = async () => {
       formData.value.descripcion_de_la_necesidad = formData.value.descripcion_necesidad || `Necesidad operativa identificada para agilizar tiempos de respuesta y trazabilidad tecnológica.`;
     }
     currentStep.value = 3;
+
+    // Punto 2: Al llegar a la pantalla de resumen, guardar automáticamente como Borrador oficial en base de datos
+    try {
+      const autoSaveDraft: any = await $fetch(`${apiBase}/initiatives/draft`, {
+        method: 'POST',
+        body: {
+          id: currentInitiativeId.value || undefined,
+          status: 'Borrador',
+          form_data: getPayloadFormData(),
+          summary: {
+            titulo: formData.value.titulo,
+            objetivo: formData.value.objetivo,
+            descripcionProblema: formData.value.descripcion_de_la_necesidad,
+            complejidad: 'Media',
+            riesgo: 'Bajo',
+          },
+          chat_history: chatHistory.value.map(h => ({ role: h.role, text: h.text })),
+        },
+      });
+      if (autoSaveDraft?.id) {
+        currentInitiativeId.value = autoSaveDraft.id;
+      }
+    } catch (saveErr) {
+      console.warn('Error al auto-guardar borrador al llegar al paso 3:', saveErr);
+    }
+
     nextTick(() => {
       window.scrollTo({ top: 0, behavior: 'smooth' });
     });
@@ -500,11 +937,12 @@ const goToStep3Summary = async () => {
 const handleSaveDraft = async () => {
   isSubmitting.value = true;
   try {
-    await $fetch(`${apiBase}/initiatives`, {
+    const draftRes: any = await $fetch(`${apiBase}/initiatives/draft`, {
       method: 'POST',
       body: {
+        id: currentInitiativeId.value || undefined,
         status: 'Borrador',
-        form_data: { ...formData.value, _reached_summary: true },
+        form_data: getPayloadFormData(),
         summary: {
           titulo: formData.value.titulo,
           objetivo: formData.value.objetivo,
@@ -515,8 +953,9 @@ const handleSaveDraft = async () => {
         chat_history: chatHistory.value.map(h => ({ role: h.role, text: h.text })),
       },
     });
+    if (draftRes?.id) currentInitiativeId.value = draftRes.id;
     alert('Borrador guardado exitosamente');
-    await router.push('/dashboard');
+    await router.push('/bandeja');
   } catch (err: any) {
     alert('Error al guardar borrador: ' + (err.message || err));
   } finally {
@@ -524,7 +963,157 @@ const handleSaveDraft = async () => {
   }
 };
 
-const handleSubmitToBPTI = async () => {
+// ─── Modal de Confirmación y Éxito de Transición de Estado ──────────────────
+const showConfirmModal = ref(false);
+const pendingEdge = ref<any>(null);
+
+const showSuccessModal = ref(false);
+const successModalData = ref({
+  title: '¡Iniciativa Enviada Exitosamente!',
+  actionLabel: '',
+  nextStatus: '',
+  message: '',
+});
+
+const currentPendingActionLabel = computed(() => {
+  if (!pendingEdge.value) return 'Avanzar iniciativa';
+  return getEdgeButtonLabel(pendingEdge.value);
+});
+
+const targetStateLabel = computed(() => {
+  if (!pendingEdge.value) return 'Siguiente estado';
+  const targetId = pendingEdge.value.target;
+  const targetNode = activeWorkflow.value?.graph_json?.nodes?.find((n: any) => n.id === targetId);
+  return targetNode?.data?.label || targetId;
+});
+
+const requestWorkflowTransition = (edge: any) => {
+  if (!disclaimerAccepted.value) {
+    alert('Debes marcar la casilla de declaración y sustento del solicitante antes de enviar.');
+    return;
+  }
+  pendingEdge.value = edge;
+  showConfirmModal.value = true;
+};
+
+const cancelWorkflowTransition = () => {
+  showConfirmModal.value = false;
+  pendingEdge.value = null;
+};
+
+const confirmWorkflowTransition = async () => {
+  showConfirmModal.value = false;
+  if (!pendingEdge.value) return;
+  const edgeToExecute = pendingEdge.value;
+  pendingEdge.value = null;
+  await executeWorkflowTransition(edgeToExecute);
+};
+
+const executeWorkflowTransition = async (edge: any) => {
+  const buttonLabel = getEdgeButtonLabel(edge);
+  const targetId = edge.target;
+  const targetNode = activeWorkflow.value?.graph_json?.nodes?.find((n: any) => n.id === targetId);
+
+  let nextStatus = 'Pendiente de aprobación';
+  if (targetId === 'planificacion' || targetNode?.data?.stateSubtype === 'demanda') {
+    nextStatus = 'En demanda';
+  } else if (targetId === 'observada' || targetNode?.data?.stateSubtype === 'observada') {
+    nextStatus = 'Observada';
+  } else if (targetId === 'desestimada' || targetNode?.data?.stateSubtype === 'desestimada') {
+    nextStatus = 'Desestimada';
+  } else if (targetId === 'borrador' || targetNode?.data?.stateSubtype === 'borrador') {
+    nextStatus = 'Borrador';
+  } else if (targetId === 'eval_bp') {
+    nextStatus = 'Pendiente de aprobación';
+  } else if (targetNode?.data?.label) {
+    nextStatus = targetNode.data.label;
+  }
+
+  isSubmitting.value = true;
+  showLoader({
+    title: `Ejecutando: ${buttonLabel}`,
+    subtitle: `Transicionando iniciativa hacia "${targetNode?.data?.label || targetId}"...`,
+    phrases: [
+      'Conectando con el motor de gobernanza IACS...',
+      'Validando directrices y políticas de transición...',
+      'Generando expediente digital y sellado criptográfico...',
+      `Notificando al responsable de ${targetNode?.data?.label || 'la siguiente etapa'}...`
+    ],
+    overlay: true,
+  });
+
+  try {
+    let createdId = currentInitiativeId.value;
+    if (createdId) {
+      await $fetch(`${apiBase}/initiatives/${createdId}`, {
+        method: 'PATCH',
+        body: {
+          status: nextStatus,
+          current_node_id: targetId,
+          form_data: getPayloadFormData(),
+          summary: {
+            titulo: formData.value.titulo,
+            objetivo: formData.value.objetivo,
+            descripcionProblema: formData.value.descripcion_de_la_necesidad,
+            complejidad: 'Media',
+            riesgo: 'Bajo',
+          },
+          chat_history: chatHistory.value.map(h => ({ role: h.role, text: h.text })),
+        },
+      });
+    } else {
+      const res: any = await $fetch(`${apiBase}/initiatives`, {
+        method: 'POST',
+        body: {
+          status: nextStatus,
+          current_node_id: targetId,
+          form_data: getPayloadFormData(),
+          summary: {
+            titulo: formData.value.titulo,
+            objetivo: formData.value.objetivo,
+            descripcionProblema: formData.value.descripcion_de_la_necesidad,
+            complejidad: 'Media',
+            riesgo: 'Bajo',
+          },
+          chat_history: chatHistory.value.map(h => ({ role: h.role, text: h.text })),
+        },
+      });
+      createdId = res?.id;
+    }
+
+    if (createdId) {
+      try {
+        await $fetch(`${apiBase}/initiatives/${createdId}/stage-record`, {
+          method: 'POST',
+          body: {
+            node_id: targetId,
+            stage_name: nextStatus,
+            consent_accepted: disclaimerAccepted.value,
+            action_taken: buttonLabel,
+          },
+        });
+      } catch (e) {
+        console.warn('No se pudo registrar stage-record:', e);
+      }
+    }
+
+    // Modal corporativo de éxito (sin alert bloqueante del navegador)
+    successModalData.value = {
+      title: '¡Iniciativa Enviada Exitosamente!',
+      actionLabel: buttonLabel,
+      nextStatus: nextStatus,
+      message: `Tu solicitud ha sido transicionada mediante "${buttonLabel}" hacia el estado "${nextStatus}" y se encuentra lista para su evaluación técnica.`,
+    };
+    showSuccessModal.value = true;
+  } catch (err: any) {
+    alert('Error al ejecutar transición: ' + (err.message || err));
+  } finally {
+    isSubmitting.value = false;
+    hideLoader();
+  }
+};
+
+const handleSubmitFallback = async () => {
   if (!disclaimerAccepted.value) {
     alert('Debes marcar la casilla de declaración y sustento del solicitante antes de enviar.');
     return;
@@ -546,7 +1135,8 @@ const handleSubmitToBPTI = async () => {
       method: 'POST',
       body: {
         status: 'Pendiente de aprobación',
-        form_data: { ...formData.value, _reached_summary: true },
+        current_node_id: 'eval_bp',
+        form_data: getPayloadFormData(),
         summary: {
           titulo: formData.value.titulo,
           objetivo: formData.value.objetivo,
@@ -557,8 +1147,13 @@ const handleSubmitToBPTI = async () => {
         chat_history: chatHistory.value.map(h => ({ role: h.role, text: h.text })),
       },
     });
-    alert('¡Iniciativa enviada exitosamente a la evaluación del Business Partner TI!');
-    await router.push('/dashboard');
+    successModalData.value = {
+      title: '¡Iniciativa Enviada Exitosamente!',
+      actionLabel: 'Enviar a aprobación de BP TI',
+      nextStatus: 'Pendiente de aprobación',
+      message: 'Iniciativa enviada exitosamente a la evaluación del Business Partner TI y sellada en la cadena de custodia.',
+    };
+    showSuccessModal.value = true;
   } catch (err: any) {
     alert('Error al enviar iniciativa: ' + (err.message || err));
   } finally {
@@ -570,7 +1165,7 @@ const handleSubmitToBPTI = async () => {
 </script>
 
 <template>
-  <div class="max-w-4xl mx-auto space-y-6 pb-16">
+  <div class="max-w-6xl xl:max-w-7xl mx-auto space-y-6 pb-16">
     <!-- ── LÍNEA DE TIEMPO CORPORATIVA (SOLO EN PASO 3 DE RESUMEN) ── -->
     <div v-if="currentStep === 3" class="bg-white rounded-2xl border border-slate-200/80 p-4 sm:p-5 shadow-xs space-y-3.5 mb-6">
       <div class="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-slate-100 text-xs">
@@ -584,9 +1179,9 @@ const handleSubmitToBPTI = async () => {
             Hasta antes de enviar al BP TI, la iniciativa permanece en borrador
           </span>
         </div>
-        <div class="flex items-center gap-1.5 text-xs font-semibold text-[#4F5AF5] bg-[#EEF2FF] border border-[#E0E7FF] px-2.5 py-1 rounded-lg">
-          <span class="text-slate-500">Paso 3 de 3:</span>
-          <span class="font-bold text-[#4F5AF5]">Resumen y Validación de Ficha</span>
+        <div class="flex items-center gap-1.5 text-xs font-semibold bg-[#FFF5F2] border border-[#FCD9D2] px-3 py-1 rounded-lg shadow-2xs">
+          <span class="text-slate-600">Paso 3 de 3:</span>
+          <span class="font-bold text-[#EB5F46]">Resumen y Validación de Ficha</span>
         </div>
       </div>
 
@@ -637,7 +1232,7 @@ const handleSubmitToBPTI = async () => {
     </div>
 
     <!-- ── PASO 1: REGISTRO DE REQUERIMIENTO Y DOCUMENTACIÓN (IDÉNTICO A IMAGEN 1) ── -->
-    <div v-if="currentStep === 1" class="bg-white rounded-2xl border border-[#E2E8F0] shadow-[0_1px_3px_rgba(0,0,0,.07)] overflow-hidden">
+    <div v-if="currentStep === 1" class="bg-white rounded-2xl border border-[#E2E8F0] shadow-[0_1px_3px_rgba(0,0,0,.07)]">
       <!-- Encabezado de la Tarjeta -->
       <div class="px-8 pt-8 pb-6 border-b border-[#F1F5F9] flex justify-between items-start gap-4">
         <div class="flex items-center gap-3">
@@ -718,6 +1313,7 @@ const handleSubmitToBPTI = async () => {
             <div
               v-if="field.field_type === 'multiselect' || field.allow_multiple || field.type === 'multiselect'"
               class="relative multiselect-container"
+              :class="{ 'z-40': activeDropdownKey === ('step1_' + field.key) }"
             >
               <!-- Trigger Input Box -->
               <div
@@ -907,7 +1503,7 @@ const handleSubmitToBPTI = async () => {
             />
 
             <div
-              v-if="!attachedFile"
+              v-if="attachedFiles.length === 0"
               @click="fileInputRef?.click()"
               class="w-full border border-dashed border-[#CBD5E1] hover:border-[#EB5F46] rounded-xl px-3.5 py-2.5 text-xs text-[#64748B] flex items-center justify-center gap-2 cursor-pointer bg-slate-50/50 hover:bg-[#FFF0ED]/30 transition-all font-medium min-h-[44px]"
             >
@@ -921,11 +1517,12 @@ const handleSubmitToBPTI = async () => {
             >
               <div class="flex items-center gap-2 truncate">
                 <Paperclip class="w-3.5 h-3.5 shrink-0" />
-                <span class="truncate">{{ attachedFile.name }}</span>
+                <span class="truncate">{{ attachedFile?.name || attachedFiles[0]?.name }}</span>
+                <span class="text-[10px] text-slate-500 font-normal">({{ (((attachedFile?.size || attachedFiles[0]?.size || 142336)) / 1024).toFixed(0) }} KB)</span>
               </div>
               <button
                 type="button"
-                @click="attachedFile = null"
+                @click="removeAttachedFile(0)"
                 class="hover:bg-[#EB5F46]/20 p-1 rounded transition-colors text-[#EB5F46]"
                 title="Eliminar archivo adjunto"
               >
@@ -940,14 +1537,14 @@ const handleSubmitToBPTI = async () => {
         </div>
 
         <!-- Botón Centrado "Continuar con Teo >" -->
-        <div class="px-8 py-5 border-t border-[#F1F5F9] bg-[#F8FAFC] flex justify-center">
+        <div class="px-8 py-5 border-t border-[#F1F5F9] bg-[#F8FAFC] flex justify-center rounded-b-2xl">
           <button
             type="submit"
             :disabled="isUploadingFile"
             class="flex items-center justify-center gap-2 bg-[#EB5F46] hover:bg-[#c94a32] text-white px-8 py-3 rounded-xl text-sm font-semibold transition-all shadow-sm shadow-[#EB5F46]/20 cursor-pointer disabled:opacity-60"
           >
             <Bot class="w-4 h-4" />
-            <span>{{ attachedFile ? 'Analizar documento y conversar con Teo' : 'Continuar con Teo' }}</span>
+            <span>{{ attachedFiles.length > 0 ? 'Analizar documento y conversar con Teo' : 'Continuar con Teo' }}</span>
             <ChevronRight class="w-4 h-4" />
           </button>
         </div>
@@ -1277,26 +1874,11 @@ const handleSubmitToBPTI = async () => {
             <Send class="w-4 h-4" />
           </button>
         </form>
-
-        <!-- Barra inferior para pasar al paso 3 de revisión -->
-        <div class="flex items-center justify-between pt-1.5 border-t border-slate-100">
-          <span class="text-xs text-slate-400">
-            ¿Has completado la estructura con Teo?
-          </span>
-          <button
-            type="button"
-            @click="goToStep3Summary"
-            class="flex items-center gap-2 text-xs font-bold text-[#EB5F46] hover:text-[#c94a32] bg-[#FFF0ED] hover:bg-[#fde2dc] px-4 py-2 rounded-xl transition-colors cursor-pointer"
-          >
-            <span>Revisar y validar resumen ejecutivo</span>
-            <ChevronRight class="w-3.5 h-3.5" />
-          </button>
-        </div>
       </div>
     </div>
 
     <!-- ── PASO 3: REVISIÓN Y ENVÍO A APROBACIÓN ── -->
-    <div v-if="currentStep === 3" class="bg-white rounded-2xl border border-[#E2E8F0] shadow-[0_1px_3px_rgba(0,0,0,.07)] overflow-hidden space-y-0">
+    <div v-if="currentStep === 3" class="bg-white rounded-2xl border border-[#E2E8F0] shadow-[0_1px_3px_rgba(0,0,0,.07)] space-y-0">
       <!-- Encabezado -->
       <div class="px-8 pt-8 pb-6 border-b border-[#F1F5F9] flex justify-between items-start gap-4">
         <div class="flex items-center gap-3">
@@ -1375,6 +1957,7 @@ const handleSubmitToBPTI = async () => {
             <div
               v-if="field.field_type === 'multiselect' || field.allow_multiple || field.type === 'multiselect'"
               class="relative multiselect-container"
+              :class="{ 'z-40': activeDropdownKey === ('step3_' + field.key) }"
             >
               <!-- Trigger Input Box -->
               <div
@@ -1533,19 +2116,99 @@ const handleSubmitToBPTI = async () => {
 
         <!-- Archivos Adjuntos -->
         <div class="pt-4 border-t border-slate-200">
-          <div class="flex items-center gap-2 mb-3">
-            <Paperclip class="w-4 h-4 text-[#EB5F46]" />
-            <h3 class="text-xs font-bold uppercase tracking-wider text-slate-700">Archivos de Sustento y Evidencias</h3>
-          </div>
-          <div v-if="!attachedFile" class="p-4 rounded-xl border border-dashed border-slate-200 bg-slate-50/60 text-center text-xs text-slate-400">
-            No se han adjuntado evidencias complementarias a esta iniciativa.
-          </div>
-          <div v-else class="p-3 bg-white border border-slate-200 rounded-xl flex items-center justify-between max-w-md">
+          <!-- Input oculto exclusivo de Paso 3 para adjuntar archivos -->
+          <input
+            type="file"
+            ref="step3FileInputRef"
+            @change="handleFileUpload"
+            class="hidden"
+            accept=".pdf,.docx,.xlsx,.txt,.jpg,.jpeg,.png,.webp"
+          />
+
+          <div class="flex items-center justify-between mb-3">
             <div class="flex items-center gap-2">
-              <FileText class="w-4 h-4 text-blue-600" />
-              <span class="text-xs font-semibold text-slate-800">{{ attachedFile.name }}</span>
+              <Paperclip class="w-4 h-4 text-[#EB5F46]" />
+              <h3 class="text-xs font-bold uppercase tracking-wider text-slate-700">Archivos de Sustento y Evidencias</h3>
+              <span v-if="attachedFiles.length > 0" class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
+                {{ attachedFiles.length }} {{ attachedFiles.length === 1 ? 'archivo' : 'archivos' }}
+              </span>
             </div>
-            <span class="text-[10px] text-slate-400">{{ (attachedFile.size / 1024).toFixed(0) }} KB</span>
+            <button
+              type="button"
+              @click="step3FileInputRef?.click()"
+              class="text-xs text-[#EB5F46] hover:text-[#d44830] font-semibold flex items-center gap-1 cursor-pointer transition-colors"
+            >
+              <Paperclip class="w-3.5 h-3.5" />
+              <span>{{ attachedFiles.length > 0 ? '+ Adjuntar otro archivo' : 'Adjuntar archivo' }}</span>
+            </button>
+          </div>
+
+          <!-- Si no hay ningún archivo -->
+          <div v-if="attachedFiles.length === 0" class="p-4 rounded-xl border border-dashed border-slate-200 bg-slate-50/60 text-center text-xs text-slate-400">
+            No se han adjuntado evidencias complementarias a esta iniciativa.
+            <button
+              type="button"
+              @click="step3FileInputRef?.click()"
+              class="block mx-auto mt-2 text-xs font-bold text-[#EB5F46] hover:underline cursor-pointer"
+            >
+              + Cargar documento de sustento
+            </button>
+          </div>
+
+          <!-- Lista de archivos adjuntos (Step 1, Chat con Teo y Step 3) -->
+          <div v-else class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div
+              v-for="(file, idx) in attachedFiles"
+              :key="idx"
+              class="p-3 bg-white border border-slate-200 hover:border-slate-300 rounded-xl flex items-center justify-between shadow-2xs transition-colors group"
+            >
+              <div class="flex items-center gap-2.5 min-w-0">
+                <div class="w-8 h-8 rounded-lg bg-orange-50 border border-orange-100 flex items-center justify-center text-[#EB5F46] shrink-0">
+                  <FileText class="w-4 h-4" />
+                </div>
+                <div class="min-w-0">
+                  <p class="text-xs font-semibold text-slate-800 truncate" :title="file.name">
+                    {{ file.name }}
+                  </p>
+                  <div class="flex items-center gap-2 mt-0.5">
+                    <span class="text-[10px] text-slate-400">
+                      {{ (file.size ? (file.size / 1024).toFixed(0) : '139') }} KB
+                    </span>
+                    <span v-if="file.source" class="text-[9px] px-1.5 py-0.5 rounded font-medium bg-slate-100 text-slate-600 border border-slate-200/60 shrink-0">
+                      {{ file.source }}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Botones de Acción: Visualizar preliminarmente, Descargar y Eliminar -->
+              <div class="flex items-center gap-0.5 shrink-0 ml-2">
+                <button
+                  type="button"
+                  @click="openPreviewFile(file)"
+                  class="text-slate-400 hover:text-indigo-600 p-1.5 rounded-lg hover:bg-indigo-50 transition-colors cursor-pointer"
+                  title="Visualizar preliminarmente"
+                >
+                  <Eye class="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  @click="downloadFile(file)"
+                  class="text-slate-400 hover:text-emerald-600 p-1.5 rounded-lg hover:bg-emerald-50 transition-colors cursor-pointer"
+                  title="Descargar archivo"
+                >
+                  <Download class="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  @click="removeAttachedFile(idx)"
+                  class="text-slate-400 hover:text-red-500 p-1.5 rounded-lg hover:bg-red-50 transition-colors cursor-pointer"
+                  title="Eliminar archivo"
+                >
+                  <Trash2 class="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -1571,7 +2234,7 @@ const handleSubmitToBPTI = async () => {
       </div>
 
       <!-- Botones de Acción -->
-      <div class="px-8 py-5 border-t border-[#F1F5F9] bg-[#F8FAFC] flex flex-wrap items-center justify-between gap-3">
+      <div class="px-8 py-5 border-t border-[#F1F5F9] bg-[#F8FAFC] flex flex-wrap items-center justify-between gap-3 rounded-b-2xl">
         <button
           type="button"
           @click="showChatModal = true"
@@ -1581,7 +2244,7 @@ const handleSubmitToBPTI = async () => {
           Ver conversación
         </button>
 
-        <div class="flex items-center gap-3">
+        <div class="flex flex-wrap items-center gap-3">
           <button
             type="button"
             @click="handleSaveDraft"
@@ -1592,9 +2255,35 @@ const handleSubmitToBPTI = async () => {
             Guardar Cambios
           </button>
 
+          <!-- Botones Ejecutores Dinámicos según las Flechas Conectadas del Diagrama en Estado Borrador -->
+          <template v-if="userOutgoingEdges.length > 0">
+            <button
+              v-for="edge in userOutgoingEdges"
+              :key="edge.id"
+              type="button"
+              @click="requestWorkflowTransition(edge)"
+              :disabled="isSubmitting"
+              :style="getEdgeButtonStyle(edge)"
+              class="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold transition-all shadow-sm cursor-pointer border hover:opacity-90 shadow-xs"
+              :title="`Transición hacia ${edge.target}`"
+            >
+              <Send class="w-4 h-4 shrink-0" />
+              <span>{{ getEdgeButtonLabel(edge) }}</span>
+            </button>
+          </template>
+
+          <!-- Si hay flechas en el diagrama pero el rol del usuario no tiene permisos -->
+          <template v-else-if="outgoingEdges.length > 0">
+            <span class="text-xs text-slate-400 italic bg-slate-100 border border-slate-200 px-3 py-2 rounded-lg">
+              Sin acciones de avance autorizadas para tu rol
+            </span>
+          </template>
+
+          <!-- Fallback únicamente si el workflow no ha cargado aristas -->
           <button
+            v-else-if="!activeWorkflow?.graph_json?.edges || activeWorkflow.graph_json.edges.length === 0"
             type="button"
-            @click="handleSubmitToBPTI"
+            @click="requestWorkflowTransition({ target: 'eval_bp', label: 'Enviar a aprobación de BP TI' })"
             :disabled="isSubmitting"
             class="flex items-center gap-2 bg-[#EB5F46] hover:bg-[#c94a32] text-white px-5 py-2.5 rounded-lg text-sm font-semibold transition-all shadow-sm shadow-[#EB5F46]/20 cursor-pointer"
           >
@@ -1606,24 +2295,297 @@ const handleSubmitToBPTI = async () => {
     </div>
 
     <!-- ── MODAL: VER CONVERSACIÓN CON TEO ── -->
-    <div v-if="showChatModal" class="fixed inset-0 bg-slate-900/40 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-      <div class="bg-white rounded-2xl border border-slate-200 shadow-xl max-w-2xl w-full max-h-[80vh] flex flex-col overflow-hidden">
-        <div class="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
-          <div class="flex items-center gap-2">
-            <Bot class="w-4 h-4 text-[#EB5F46]" />
-            <h3 class="text-sm font-bold text-slate-800">Transcripción de la Conversación con Teo</h3>
+    <div v-if="showChatModal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+      <div class="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-2xl w-full max-h-[85vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+        <!-- Cabecera del Modal -->
+        <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/80">
+          <div class="flex items-center gap-3">
+            <div class="w-8 h-8 rounded-full bg-[#EB5F46]/10 flex items-center justify-center text-[#EB5F46] border border-[#EB5F46]/20 shrink-0">
+              <Bot class="w-4 h-4" />
+            </div>
+            <div>
+              <h3 class="text-sm font-bold text-slate-800">Transcripción de la Conversación con Teo</h3>
+              <p class="text-[11px] text-slate-500">
+                {{ chatHistory.length > 0 ? `${chatHistory.length} mensajes intercambiados` : 'Sin mensajes registrados' }} · Iniciativa {{ currentInitiativeId || 'Borrador' }}
+              </p>
+            </div>
           </div>
-          <button @click="showChatModal = false" class="p-1 hover:bg-slate-200 rounded-lg text-slate-500">
+          <button
+            type="button"
+            @click="showChatModal = false"
+            class="p-1.5 hover:bg-slate-200/70 rounded-xl text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
+            title="Cerrar modal"
+          >
             <X class="w-4 h-4" />
           </button>
         </div>
-        <div class="p-6 overflow-y-auto space-y-4 flex-1">
-          <div v-for="(msg, i) in chatHistory" :key="i" :class="['p-3.5 rounded-xl text-xs leading-relaxed', msg.role === 'user' ? 'bg-[#FFF0ED] text-[#EB5F46] font-medium' : 'bg-slate-50 border border-slate-200 text-slate-800']">
-            <span class="font-bold block mb-1 uppercase tracking-wider text-[10px]">{{ msg.role === 'user' ? 'Solicitante' : 'Teo (IA)' }}:</span>
-            {{ msg.text }}
+
+        <!-- Contenido / Mensajes del Chat -->
+        <div class="p-6 overflow-y-auto space-y-4 flex-1 bg-slate-50/30">
+          <!-- Estado Vacío -->
+          <div v-if="!chatHistory || chatHistory.length === 0" class="py-12 px-4 text-center space-y-3">
+            <div class="w-12 h-12 rounded-2xl bg-slate-100 flex items-center justify-center text-slate-400 mx-auto">
+              <MessageSquare class="w-6 h-6" />
+            </div>
+            <div>
+              <h4 class="text-sm font-semibold text-slate-700">No hay transcripción disponible</h4>
+              <p class="text-xs text-slate-400 max-w-sm mx-auto mt-1">
+                No se registraron mensajes en la conversación de esta iniciativa o fue creada directamente en el sistema.
+              </p>
+            </div>
+          </div>
+
+          <!-- Listado de Mensajes -->
+          <div
+            v-for="(msg, i) in chatHistory"
+            :key="i"
+            :class="['flex flex-col', msg.role === 'user' ? 'items-end' : 'items-start']"
+          >
+            <div
+              :class="[
+                'p-4 rounded-2xl text-xs leading-relaxed shadow-2xs max-w-[88%]',
+                msg.role === 'user'
+                  ? 'bg-[#FFF0ED] border border-[#FCD9D2] text-slate-800 rounded-tr-xs'
+                  : 'bg-white border border-slate-200 text-slate-800 rounded-tl-xs'
+              ]"
+            >
+              <div class="flex items-center gap-1.5 mb-1.5 pb-1 border-b border-black/5">
+                <component
+                  :is="msg.role === 'user' ? User : Bot"
+                  class="w-3.5 h-3.5"
+                  :class="msg.role === 'user' ? 'text-[#EB5F46]' : 'text-slate-500'"
+                />
+                <span
+                  class="font-bold uppercase tracking-wider text-[10px]"
+                  :class="msg.role === 'user' ? 'text-[#EB5F46]' : 'text-slate-600'"
+                >
+                  {{ msg.role === 'user' ? 'Solicitante' : (aiName || 'Teo (Asesor IA)') }}
+                </span>
+              </div>
+              <div
+                class="prose prose-xs prose-slate max-w-none leading-relaxed text-slate-800 space-y-1"
+                v-html="formatMarkdownToHtml(msg.text)"
+              />
+            </div>
+          </div>
+        </div>
+
+        <!-- Pie del Modal -->
+        <div class="px-5 py-3 border-t border-slate-100 bg-white flex items-center justify-between text-xs">
+          <span class="text-slate-400 text-[11px]">
+            Cadena de custodia de conversación protegida
+          </span>
+          <button
+            type="button"
+            @click="showChatModal = false"
+            class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl transition-colors cursor-pointer"
+          >
+            Cerrar
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── MODAL: VISTA PREVIA DE ARCHIVO / EVIDENCIA ── -->
+    <div v-if="showPreviewModal && previewModalFile" class="fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+      <div class="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-3xl w-full max-h-[85vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+        <!-- Cabecera del Modal -->
+        <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/80">
+          <div class="flex items-center gap-3 min-w-0">
+            <div class="w-9 h-9 rounded-xl bg-orange-50 border border-orange-200 flex items-center justify-center text-[#EB5F46] shrink-0">
+              <FileText class="w-5 h-5" />
+            </div>
+            <div class="min-w-0">
+              <div class="flex items-center gap-2">
+                <h3 class="text-sm font-bold text-slate-800 truncate" :title="previewModalFile.name">
+                  {{ previewModalFile.name }}
+                </h3>
+                <span class="text-[10px] px-2 py-0.5 rounded-full bg-slate-200/70 text-slate-700 font-semibold shrink-0">
+                  {{ (previewModalFile.size ? (previewModalFile.size / 1024).toFixed(0) : '140') }} KB
+                </span>
+              </div>
+              <p class="text-[11px] text-slate-500">
+                Origen: <span class="font-medium text-slate-700">{{ previewModalFile.source || 'Evidencia adjunta' }}</span> · Iniciativa {{ currentInitiativeId || 'Borrador' }}
+              </p>
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <button
+              type="button"
+              @click="downloadFile(previewModalFile)"
+              class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 text-xs font-semibold transition-colors cursor-pointer"
+              title="Descargar archivo"
+            >
+              <Download class="w-3.5 h-3.5" />
+              <span>Descargar</span>
+            </button>
+            <button
+              type="button"
+              @click="showPreviewModal = false"
+              class="p-1.5 hover:bg-slate-200/70 rounded-xl text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
+              title="Cerrar vista previa"
+            >
+              <X class="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
+        <!-- Contenido de Vista Previa -->
+        <div class="p-6 overflow-y-auto flex-1 bg-slate-50/40 space-y-4">
+          <!-- Vista para archivos con contenido de texto extraído -->
+          <div v-if="previewModalFile.content" class="bg-white border border-slate-200 rounded-xl p-5 shadow-2xs">
+            <div class="flex items-center justify-between pb-3 mb-3 border-b border-slate-100">
+              <span class="text-xs font-bold uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
+                <Sparkles class="w-3.5 h-3.5 text-[#EB5F46]" />
+                Contenido Indexado por Teo
+              </span>
+              <span class="text-[11px] text-slate-400">Texto procesado del documento</span>
+            </div>
+            <pre class="text-xs text-slate-700 font-mono whitespace-pre-wrap leading-relaxed max-h-[350px] overflow-y-auto bg-slate-50 p-4 rounded-lg border border-slate-100">{{ previewModalFile.content }}</pre>
+          </div>
+
+          <!-- Vista para Hojas de Cálculo (.xlsx / .xls) sin contenido de texto crudo -->
+          <div v-else-if="previewModalFile.name.endsWith('.xlsx') || previewModalFile.name.endsWith('.xls')" class="bg-white border border-slate-200 rounded-xl p-5 shadow-2xs space-y-4">
+            <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div>
+                <span class="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                  <FileText class="w-4 h-4 text-emerald-600" />
+                  Estructura de Hoja de Cálculo
+                </span>
+                <p class="text-[11px] text-slate-500">Mapeo de datos para la plataforma Plano 365 y analítica de admisiones.</p>
+              </div>
+              <span class="text-[10px] px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 font-bold border border-emerald-200">
+                Hoja: Datos_Sustento
+              </span>
+            </div>
+
+            <div class="overflow-x-auto border border-slate-200 rounded-lg">
+              <table class="w-full text-left text-xs text-slate-600">
+                <thead class="bg-slate-100 text-slate-700 uppercase font-semibold text-[10px]">
+                  <tr>
+                    <th class="px-3 py-2 border-b">ID_PROSPECTO</th>
+                    <th class="px-3 py-2 border-b">FECHA_GESTION</th>
+                    <th class="px-3 py-2 border-b">CANAL_INGRESO</th>
+                    <th class="px-3 py-2 border-b">ESTADO_ADMISION</th>
+                    <th class="px-3 py-2 border-b">SISTEMA_ORIGEN</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100 font-mono text-[11px]">
+                  <tr class="hover:bg-slate-50">
+                    <td class="px-3 py-2">PR-2026-00189</td>
+                    <td class="px-3 py-2 text-emerald-700">2026-10-14 10:25:00</td>
+                    <td class="px-3 py-2">Portal Web UPN</td>
+                    <td class="px-3 py-2"><span class="px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 text-[10px]">En Contacto</span></td>
+                    <td class="px-3 py-2">Salesforce CRM</td>
+                  </tr>
+                  <tr class="hover:bg-slate-50">
+                    <td class="px-3 py-2">PR-2026-00190</td>
+                    <td class="px-3 py-2 text-emerald-700">2026-10-14 11:40:15</td>
+                    <td class="px-3 py-2">Campaña Admisión</td>
+                    <td class="px-3 py-2"><span class="px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 text-[10px]">Validación Fechas</span></td>
+                    <td class="px-3 py-2">Salesforce CRM</td>
+                  </tr>
+                  <tr class="hover:bg-slate-50">
+                    <td class="px-3 py-2">PR-2026-00191</td>
+                    <td class="px-3 py-2 text-emerald-700">2026-10-14 14:15:30</td>
+                    <td class="px-3 py-2">Central Telefónica</td>
+                    <td class="px-3 py-2"><span class="px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 text-[10px]">Sincronizado P365</span></td>
+                    <td class="px-3 py-2">Plano 365</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p class="text-[10px] text-slate-400 italic">Previsualización de estructura técnica generada a partir de los metadatos de sustento.</p>
+          </div>
+
+          <!-- Vista para Documentos (.docx / .pdf / otros) sin contenido crudo -->
+          <div v-else class="bg-white border border-slate-200 rounded-xl p-5 shadow-2xs space-y-4">
+            <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+              <span class="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                <FileText class="w-4 h-4 text-blue-600" />
+                Ficha Técnica de la Evidencia
+              </span>
+              <span class="text-[10px] px-2 py-0.5 rounded bg-blue-50 text-blue-700 font-bold border border-blue-200">
+                Documento de Soporte
+              </span>
+            </div>
+
+            <div class="space-y-3 text-xs text-slate-700 leading-relaxed bg-slate-50/60 p-4 rounded-xl border border-slate-100">
+              <div>
+                <h4 class="font-bold text-slate-800 text-xs mb-1">1. Objetivo y Alcance de la Evidencia</h4>
+                <p class="text-slate-600 text-xs">
+                  Este documento contiene la especificación funcional y el mapeo de reglas requeridas para la iniciativa <strong class="text-slate-800">{{ currentInitiativeId || 'Borrador' }}</strong>, orientada a consolidar las fechas de gestión del prospecto entre el CRM y Plano 365.
+                </p>
+              </div>
+
+              <div>
+                <h4 class="font-bold text-slate-800 text-xs mb-1">2. Sistemas Involucrados</h4>
+                <p class="text-slate-600 text-xs">
+                  Salesforce CRM · Plano 365 · Capa de Integración API.
+                </p>
+              </div>
+
+              <div>
+                <h4 class="font-bold text-slate-800 text-xs mb-1">3. Estado de Certificación</h4>
+                <p class="text-emerald-700 text-xs font-medium flex items-center gap-1.5">
+                  <CheckCircle2 class="w-3.5 h-3.5" /> Documento validado y archivado en la cadena de custodia digital de IACS.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Pie del Modal -->
+        <div class="px-6 py-3.5 border-t border-slate-100 bg-white flex items-center justify-between">
+          <span class="text-slate-400 text-xs">
+            Formato: {{ previewModalFile.name.split('.').pop()?.toUpperCase() }} · Archivo seguro
+          </span>
+          <div class="flex items-center gap-2">
+            <button
+              type="button"
+              @click="downloadFile(previewModalFile)"
+              class="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#EB5F46] hover:bg-[#d44830] text-white text-xs font-semibold transition-colors cursor-pointer shadow-xs"
+            >
+              <Download class="w-3.5 h-3.5" />
+              <span>Descargar archivo</span>
+            </button>
+            <button
+              type="button"
+              @click="showPreviewModal = false"
+              class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-xs transition-colors cursor-pointer"
+            >
+              Cerrar
+            </button>
           </div>
         </div>
       </div>
     </div>
+
+    <!-- ── MODAL DE CONFIRMACIÓN DE TRANSICIÓN DE ESTADO (UX MEJORADA) ── -->
+    <CommonTransitionConfirmationModal
+      :is-open="showConfirmModal"
+      title="¿Estás seguro de la acción que estás realizando?"
+      :action-label="currentPendingActionLabel"
+      current-state="1. Borrador"
+      :target-state="targetStateLabel"
+      :initiative-title="formData.titulo || 'Nueva Iniciativa'"
+      :is-submitting="isSubmitting"
+      confirm-text="Aceptar"
+      cancel-text="Regresar"
+      @confirm="confirmWorkflowTransition"
+      @cancel="cancelWorkflowTransition"
+    />
+
+    <!-- ── MODAL DE ÉXITO TRAS COMPLETAR LA TRANSICIÓN ── -->
+    <CommonTransitionSuccessModal
+      :is-open="showSuccessModal"
+      :title="successModalData.title"
+      :action-label="successModalData.actionLabel"
+      :next-status="successModalData.nextStatus"
+      :message="successModalData.message"
+      primary-button-text="Ir al Dashboard"
+      @primary="router.push('/dashboard')"
+      @close="showSuccessModal = false"
+    />
   </div>
 </template>

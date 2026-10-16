@@ -20,6 +20,7 @@ SAMPLE_INITIATIVES = [
             "vicepresidencia": "Comercial",
             "direccion": "Dirección de Admisiones y Ventas",
             "registrador": "Administrador General",
+            "registrador_email": "admin@iacs.empresa.com",
             "bp_ti_asignado": "Carlos Mendoza",
             "lider_de_dominio_responsable": "Roberto Gómez",
             "titulo": "Automatización del proceso de captura de prospectos digitales",
@@ -44,6 +45,7 @@ SAMPLE_INITIATIVES = [
             "vicepresidencia": "Comercial",
             "direccion": "Dirección de Marketing Corporativo",
             "registrador": "Administrador General",
+            "registrador_email": "admin@iacs.empresa.com",
             "bp_ti_asignado": "Carlos Mendoza",
             "lider_de_dominio_responsable": "Roberto Gómez",
             "titulo": "Portal de eventos y charlas vocacionales online",
@@ -67,6 +69,7 @@ SAMPLE_INITIATIVES = [
             "vicepresidencia": "Comercial",
             "direccion": "Dirección de Retención y Fidelización",
             "registrador": "Administrador General",
+            "registrador_email": "admin@iacs.empresa.com",
             "bp_ti_asignado": "Ana Lucía Ramos",
             "lider_de_dominio_responsable": "Jorge Velásquez",
             "titulo": "Sistema de alertas tempranas de deserción de postulantes",
@@ -80,6 +83,29 @@ SAMPLE_INITIATIVES = [
             "riesgo": "Medio",
         },
         "days_ago": 3,
+    },
+    {
+        "id": "INIT-SAMPLE-ESTHER-01",
+        "status": "Borrador",
+        "current_node_id": "borrador",
+        "form_data": {
+            "institucion": "UPC",
+            "vicepresidencia": "Operaciones",
+            "direccion": "Dirección de Logística y Adquisiciones",
+            "registrador": "IA - Esther registradora",
+            "registrador_email": "esther@captcha.com",
+            "bp_ti_asignado": "Carlos Mendoza",
+            "titulo": "Digitalización y trazabilidad de órdenes de compra de laboratorio",
+            "_reached_summary": True,
+        },
+        "summary": {
+            "id_corta": "OPE-001",
+            "titulo": "Digitalización y trazabilidad de órdenes de compra de laboratorio",
+            "objetivo": "Automatizar la recepción y auditoría de insumos para laboratorios de simulación médica.",
+            "complejidad": "Baja",
+            "riesgo": "Bajo",
+        },
+        "days_ago": 1,
     },
     {
         "id": "INIT-SAMPLE-04",
@@ -417,6 +443,18 @@ AI_TRAINING_CONFIG_SEED = [
         "sort_order": 3,
     },
     {
+        "layer": "guardrails",
+        "title": "Soberanía del Negocio y Human-in-the-Loop",
+        "content": (
+            "La IA nunca define, asume ni inventa por su cuenta cifras ni decisiones del negocio (horas de ahorro, "
+            "presupuesto, ROI, prioridades). El único dueño de la verdad operativa es el usuario humano. "
+            "En las opciones sugeridas ('options'), queda estrictamente prohibido incluir respuestas como "
+            "'Prefiero que tú propongas el rango', 'Decídelo tú' o que deleguen el juicio operativo a la IA. "
+            "Si el usuario requiere apoyo para estimar, ofrece alternativas de facilitación metodológica."
+        ),
+        "sort_order": 4,
+    },
+    {
         "layer": "examples",
         "title": "Necesidad de automatizar admisiones",
         "content": (
@@ -677,6 +715,14 @@ async def seed_database_if_needed():
                 else:
                     created_at = now
 
+                reg_email = (sample["form_data"].get("registrador_email") or "").strip().lower()
+                sample_user_id = None
+                if reg_email:
+                    p_res = await db.execute(select(Profile).where(func.lower(Profile.email) == reg_email))
+                    p_obj = p_res.scalar_one_or_none()
+                    if p_obj:
+                        sample_user_id = p_obj.id
+
                 if not existing:
                     db.add(Initiative(
                         id=sample["id"],
@@ -685,6 +731,7 @@ async def seed_database_if_needed():
                         form_data=sample["form_data"],
                         summary=sample["summary"],
                         chat_history=[],
+                        user_id=sample_user_id,
                         created_at=created_at,
                         updated_at=created_at,
                     ))
@@ -693,6 +740,8 @@ async def seed_database_if_needed():
                     existing.status = sample["status"]
                     existing.form_data = sample["form_data"]
                     existing.summary = sample["summary"]
+                    if sample_user_id:
+                        existing.user_id = sample_user_id
             await db.commit()
 
             # 6. Carpetas de IA y Configuración de Entrenamiento
@@ -770,7 +819,7 @@ async def seed_database_if_needed():
                     "name": "Formulario para captar iniciativa",
                     "description": "Formulario oficial de captura de necesidad, contexto organizacional [Institución, VP, Dirección], justificación detallada y beneficios esperados.",
                     "fields": [
-                        {"id": "f_inst", "key": "institucion", "label": "¿Qué institución tiene la necesidad?", "type": "select", "required": True, "options": ["UPC", "UPN", "Cibertec", "Laureate Perú"], "ask_in_initial_form": True},
+                        {"id": "f_inst", "key": "institucion", "label": "¿Qué institución tiene la necesidad?", "type": "multiselect", "allow_multiple": True, "required": True, "options": ["UPC", "UPN", "Cibertec", "Laureate Perú"], "ask_in_initial_form": True},
                         {"id": "f_vp", "key": "vicepresidencia", "label": "Vicepresidencia", "type": "select", "required": True, "ask_in_initial_form": True},
                         {"id": "f_dir", "key": "direccion", "label": "Dirección", "type": "select", "required": True, "ask_in_initial_form": True},
                         {"id": "f_tit", "key": "titulo", "label": "Título de la iniciativa", "type": "text", "required": True, "placeholder": "Verbo infinitivo + objeto + impacto", "ask_in_initial_form": False},
