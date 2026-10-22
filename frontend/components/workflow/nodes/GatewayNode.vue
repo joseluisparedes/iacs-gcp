@@ -17,50 +17,50 @@ const rules = computed(() => gatewayConfig.value.rules || [
   { edgeId: 'e-gw-si', operator: 'equals', value: 'Sí', targetLabel: 'SÍ requiere presupuesto' },
   { edgeId: 'e-gw-no', operator: 'equals', value: 'No', targetLabel: 'NO requiere presupuesto' }
 ]);
+
+const handleVisibleClass = computed(() =>
+  props.selected
+    ? 'opacity-100 scale-100 pointer-events-auto ring-2 ring-amber-300'
+    : 'opacity-0 scale-90 pointer-events-none group-hover:opacity-100 group-hover:scale-100 group-hover:pointer-events-auto transition-all duration-150'
+);
 </script>
 
 <template>
   <div
     :class="[
-      'relative min-w-[240px] max-w-[280px] rounded-2xl bg-amber-50/95 border transition-all duration-150 group shadow-xs select-none text-left',
-      selected ? 'ring-2 ring-amber-500 border-amber-500 shadow-md' : 'border-amber-300 hover:border-amber-400'
+      'relative w-[280px] rounded-2xl bg-amber-50/95 border transition-all duration-150 group shadow-xs select-none text-left',
+      selected ? 'ring-2 ring-amber-500 border-amber-500 shadow-md' : 'border-amber-300 hover:border-amber-400 hover:shadow-md'
     ]"
   >
-    <!-- Top Handles (In & Out) -->
+    <!-- Top Handle (Input / Entrada Superior) -->
     <Handle
       type="target"
       :position="Position.Top"
       id="top"
-      class="!w-4.5 !h-4.5 !bg-amber-500 !border-[3px] !border-white shadow-md hover:!scale-125 !transition-transform z-30"
-    />
-    <Handle
-      type="source"
-      :position="Position.Top"
-      id="top-out"
-      class="!w-4.5 !h-4.5 !bg-amber-500 !border-[3px] !border-white shadow-md hover:!scale-125 !transition-transform z-30"
+      :class="['!w-4.5 !h-4.5 !bg-amber-500 !border-[3px] !border-white shadow-md z-30', handleVisibleClass]"
+      title="Entrada Superior"
     />
 
-    <!-- Left Handles (In & Out) -->
+    <!-- Left Handle (Input / Entrada Principal a la Compuerta) -->
     <Handle
       type="target"
       :position="Position.Left"
       id="left"
-      class="!w-4.5 !h-4.5 !bg-amber-500 !border-[3px] !border-white shadow-md hover:!scale-125 !transition-transform z-30"
-    />
-    <Handle
-      type="source"
-      :position="Position.Left"
-      id="left-out"
-      class="!w-4.5 !h-4.5 !bg-amber-500 !border-[3px] !border-white shadow-md hover:!scale-125 !transition-transform z-30"
+      :class="['!w-4.5 !h-4.5 !bg-amber-500 !border-[3px] !border-white shadow-md z-30', handleVisibleClass]"
+      title="Entrada Principal (Destino)"
     />
 
     <!-- Header -->
-    <div className="flex items-center gap-2 px-3.5 py-2.5 border-b border-amber-200/80 bg-gradient-to-r from-amber-100/90 to-orange-100/60 rounded-t-2xl">
-      <div className="w-5 h-5 rounded-md bg-amber-200/80 flex items-center justify-center text-amber-800 shrink-0">
-        <GitFork className="w-3.5 h-3.5 text-amber-800 shrink-0" />
+    <div class="flex items-start gap-2 px-3.5 py-2.5 border-b border-amber-200/80 bg-gradient-to-r from-amber-100/90 to-orange-100/60 rounded-t-2xl">
+      <div class="w-5 h-5 rounded-md bg-amber-200/80 flex items-center justify-center text-amber-800 shrink-0 mt-0.5">
+        <GitFork class="w-3.5 h-3.5 text-amber-800 shrink-0" />
       </div>
-      <span className="font-bold text-xs text-amber-950 truncate flex-1" :title="label">{{ label }}</span>
-      <span className="text-[9px] bg-amber-200/90 text-amber-900 px-2 py-0.5 rounded-full border border-amber-300 font-bold shrink-0">
+      <div class="flex-1 min-w-0 pr-1">
+        <span class="font-bold text-xs text-amber-950 leading-snug break-words block" :title="label">
+          {{ label }}
+        </span>
+      </div>
+      <span class="text-[9px] bg-amber-200/90 text-amber-900 px-2 py-0.5 rounded-full border border-amber-300 font-bold shrink-0 self-start mt-0.5">
         Decisión
       </span>
     </div>
@@ -108,32 +108,22 @@ const rules = computed(() => gatewayConfig.value.rules || [
       </div>
     </div>
 
-    <!-- Right Handles (Branch output & input) -->
+    <!-- Right Handle (Branch output / Salida Rama Sí) -->
     <Handle
       type="source"
       :position="Position.Right"
       id="right"
-      class="!w-4.5 !h-4.5 !bg-amber-500 !border-[3px] !border-white shadow-md hover:!scale-125 !transition-transform z-30"
-    />
-    <Handle
-      type="target"
-      :position="Position.Right"
-      id="right-in"
-      class="!w-4.5 !h-4.5 !bg-amber-500 !border-[3px] !border-white shadow-md hover:!scale-125 !transition-transform z-30"
+      :class="['!w-4.5 !h-4.5 !bg-amber-500 !border-[3px] !border-white shadow-md z-30', handleVisibleClass]"
+      title="Salida Lateral (Origen Rama Sí / Positiva)"
     />
 
-    <!-- Bottom Handles (Branch output & input) -->
+    <!-- Bottom Handle (Branch output / Salida Rama No) -->
     <Handle
       type="source"
       :position="Position.Bottom"
       id="bottom"
-      class="!w-4.5 !h-4.5 !bg-amber-500 !border-[3px] !border-white shadow-md hover:!scale-125 !transition-transform z-30"
-    />
-    <Handle
-      type="target"
-      :position="Position.Bottom"
-      id="bottom-in"
-      class="!w-4.5 !h-4.5 !bg-amber-500 !border-[3px] !border-white shadow-md hover:!scale-125 !transition-transform z-30"
+      :class="['!w-4.5 !h-4.5 !bg-amber-500 !border-[3px] !border-white shadow-md z-30', handleVisibleClass]"
+      title="Salida Inferior (Origen Rama No / Alternativa)"
     />
   </div>
 </template>

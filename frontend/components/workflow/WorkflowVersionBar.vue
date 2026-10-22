@@ -1,18 +1,14 @@
 <script setup lang="ts">
-import { ref } from 'vue';
 import { 
-  Save, 
   Send, 
-  Play, 
-  Users, 
-  CheckCircle2, 
-  Clock, 
   AlertCircle, 
   Loader2, 
   Check, 
   Undo2, 
   Redo2, 
-  Sparkles 
+  Sparkles,
+  Layers,
+  Bookmark
 } from 'lucide-vue-next';
 
 const props = defineProps<{
@@ -23,29 +19,17 @@ const props = defineProps<{
   isSaving: boolean;
   canUndo: boolean;
   canRedo: boolean;
+  hasFavoriteCoordinates?: boolean;
 }>();
 
 const emit = defineEmits<{
-  (e: 'save'): void;
-  (e: 'publish'): void;
-  (e: 'open-roles-modal'): void;
-  (e: 'auto-layout'): void;
+  (e: 'save-and-publish'): void;
+  (e: 'open-macro-stages-modal'): void;
+  (e: 'save-favorite-coordinates'): void;
+  (e: 'apply-favorite-coordinates'): void;
   (e: 'undo'): void;
   (e: 'redo'): void;
 }>();
-
-const showPublishModal = ref(false);
-const isPublishing = ref(false);
-
-const handleConfirmPublish = async () => {
-  isPublishing.value = true;
-  try {
-    emit('publish');
-    showPublishModal.value = false;
-  } finally {
-    isPublishing.value = false;
-  }
-};
 </script>
 
 <template>
@@ -56,35 +40,22 @@ const handleConfirmPublish = async () => {
         <h1 class="text-sm font-bold text-slate-800 truncate max-w-xs md:max-w-md" :title="workflowName">
           {{ workflowName || 'Flujo Oficial de Gestión de la Demanda' }}
         </h1>
-        <span class="text-[10px] font-mono px-2 py-0.5 bg-slate-100 text-slate-700 rounded-md border border-slate-200 font-bold">
+        <span class="text-xs px-2 py-0.5 rounded-full font-mono bg-slate-100 text-slate-600 font-semibold border border-slate-200">
           v{{ version }}
+        </span>
+        <span
+          class="text-xs px-2.5 py-0.5 rounded-full font-semibold border"
+          :class="status === 'published' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200'"
+        >
+          {{ status === 'published' ? 'Publicado Activo' : 'Borrador' }}
         </span>
       </div>
 
-      <!-- Status Badge -->
-      <span
-        v-if="status === 'published'"
-        class="text-[10px] font-semibold px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded-full border border-emerald-200 flex items-center gap-1 shadow-2xs"
-      >
-        <CheckCircle2 class="w-3 h-3 text-emerald-600" />
-        Publicado Activo
-      </span>
-      <span
-        v-else-if="status === 'archived'"
-        class="text-[10px] font-semibold px-2 py-0.5 bg-slate-100 text-slate-600 rounded-full border border-slate-300 shadow-2xs"
-      >
-        Archivado
-      </span>
-      <span
-        v-else
-        class="text-[10px] font-semibold px-2 py-0.5 bg-amber-50 text-amber-800 rounded-full border border-amber-300 flex items-center gap-1 shadow-2xs"
-      >
-        <Clock class="w-3 h-3 text-amber-600" />
-        Borrador en Edición
-      </span>
+      <!-- Separator -->
+      <div class="h-4 w-px bg-slate-200"></div>
 
-      <!-- Autosave Status -->
-      <div class="hidden sm:flex items-center gap-1 text-[11px] text-slate-400 pl-2">
+      <!-- Auto-save / Dirty Status -->
+      <div class="flex items-center gap-1.5 text-xs">
         <span v-if="isSaving" class="text-indigo-600 flex items-center gap-1">
           <Loader2 class="w-3 h-3 animate-spin text-[#4F5AF5]" />
           <span>Guardando...</span>
@@ -124,92 +95,57 @@ const handleConfirmPublish = async () => {
         </button>
       </div>
 
-      <!-- Asignación de Roles -->
+      <!-- Configurar Macro-Etapas (Stepper) -->
       <button
         type="button"
-        @click="emit('open-roles-modal')"
-        class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-300 rounded-xl hover:bg-slate-50 transition-colors shadow-2xs cursor-pointer"
+        @click="emit('open-macro-stages-modal')"
+        class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50/90 border border-indigo-200 rounded-xl hover:bg-indigo-100 transition-colors shadow-2xs cursor-pointer"
+        title="Configurar y ordenar las macro-etapas del stepper de la iniciativa"
       >
-        <Users class="w-3.5 h-3.5 text-slate-500" />
-        <span class="hidden md:inline">Asignación de Roles</span>
+        <Layers class="w-3.5 h-3.5 text-indigo-600" />
+        <span class="hidden md:inline">Macro-Etapas</span>
       </button>
 
-      <!-- Organizar Diagrama -->
+      <!-- Separator -->
+      <div class="h-4 w-px bg-slate-200"></div>
+
+      <!-- Guardar Coordenadas Favoritas -->
       <button
         type="button"
-        @click="emit('auto-layout')"
-        class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-[#EB5F46] bg-[#FFF0ED] border border-[#FCD9D2] hover:bg-[#FDE2DC] rounded-xl transition-colors shadow-2xs cursor-pointer"
-        title="Reorganizar automáticamente todas las cajas sin sobreposiciones"
+        @click="emit('save-favorite-coordinates')"
+        class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-300 rounded-xl transition-colors shadow-2xs cursor-pointer"
+        title="Guarda la posición actual de todas las cajas como tu distribución favorita"
       >
-        <Sparkles class="w-3.5 h-3.5 text-[#EB5F46]" />
-        <span class="hidden sm:inline">Organizar Diagrama</span>
+        <Bookmark class="w-3.5 h-3.5 text-amber-600" />
+        <span class="hidden sm:inline">Guardar Favoritas</span>
       </button>
 
-      <!-- Simular -->
-      <NuxtLink
-        to="/admin/workflow-simulator"
-        class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-300 rounded-xl hover:bg-slate-50 transition-colors shadow-2xs"
-      >
-        <Play class="w-3.5 h-3.5 text-[#EB5F46]" />
-        <span class="hidden md:inline">Simular</span>
-      </NuxtLink>
-
-      <!-- Guardar -->
+      <!-- Aplicar Coordenadas Favoritas -->
       <button
         type="button"
-        @click="emit('save')"
+        @click="emit('apply-favorite-coordinates')"
+        class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 rounded-xl transition-colors shadow-2xs cursor-pointer"
+        title="Reordena las cajas según la distribución favorita que guardaste"
+      >
+        <Sparkles class="w-3.5 h-3.5 text-emerald-600" />
+        <span class="hidden sm:inline">Aplicar Favoritas</span>
+      </button>
+
+      <!-- Separator -->
+      <div class="h-4 w-px bg-slate-200"></div>
+
+      <!-- Guardar y Publicar (Unificado en un solo botón) -->
+      <button
+        type="button"
+        @click="emit('save-and-publish')"
         :disabled="isSaving"
-        class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-300 rounded-xl hover:bg-slate-50 transition-colors shadow-2xs disabled:opacity-50 cursor-pointer"
+        class="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white bg-gradient-to-r from-[#EB5F46] to-[#d64f38] hover:from-[#d64f38] hover:to-[#bd412c] rounded-xl shadow-xs transition-all cursor-pointer transform active:scale-95 disabled:opacity-50"
+        title="Guarda los cambios y publica el flujo como modelo activo del sistema"
       >
-        <Save class="w-3.5 h-3.5 text-slate-600" />
-        <span class="hidden sm:inline">Guardar</span>
+        <Loader2 v-if="isSaving" class="w-3.5 h-3.5 animate-spin" />
+        <Send v-else class="w-3.5 h-3.5" />
+        <span>Guardar y Publicar</span>
       </button>
-
-      <!-- Publicar Flujo -->
-      <button
-        type="button"
-        @click="showPublishModal = true"
-        class="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-white bg-gradient-to-r from-[#EB5F46] to-[#d64f38] hover:from-[#d64f38] hover:to-[#bd412c] rounded-xl shadow-xs transition-all cursor-pointer transform active:scale-95"
-      >
-        <Send class="w-3.5 h-3.5" />
-        <span>Publicar Flujo</span>
-      </button>
-    </div>
-
-    <!-- Modal de Publicación -->
-    <div v-if="showPublishModal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-xs p-4">
-      <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-100 animate-in fade-in zoom-in duration-150 text-left">
-        <h3 class="text-base font-bold text-slate-900 mb-2">¿Publicar este Flujo de Trabajo?</h3>
-        <p class="text-xs text-slate-600 leading-relaxed mb-4">
-          Al publicar, este flujo se convertirá en el <strong>modelo activo del sistema</strong>. Las nuevas iniciativas seguirán este esquema de estados, roles, validaciones e IA. El flujo activo anterior pasará a estado archivado automáticamente.
-        </p>
-
-        <div class="p-3 bg-amber-50 rounded-xl border border-amber-200 text-xs text-amber-900 mb-5 flex items-start gap-2">
-          <AlertCircle class="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-          <span>Las iniciativas que ya se encuentran en curso continuarán con su flujo histórico sin verse afectadas.</span>
-        </div>
-
-        <div class="flex items-center justify-end gap-2.5">
-          <button
-            type="button"
-            @click="showPublishModal = false"
-            :disabled="isPublishing"
-            class="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
-          >
-            Cancelar
-          </button>
-          <button
-            type="button"
-            @click="handleConfirmPublish"
-            :disabled="isPublishing"
-            class="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-[#EB5F46] hover:bg-[#d64f38] rounded-xl transition-colors shadow-xs cursor-pointer"
-          >
-            <Loader2 v-if="isPublishing" class="w-3.5 h-3.5 animate-spin" />
-            <Send v-else class="w-3.5 h-3.5" />
-            <span>Confirmar y Publicar</span>
-          </button>
-        </div>
-      </div>
     </div>
   </header>
 </template>

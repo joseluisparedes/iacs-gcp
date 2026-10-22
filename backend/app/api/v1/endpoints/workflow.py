@@ -330,17 +330,23 @@ async def publish_workflow(id: str, payload: Optional[Dict[str, Any]] = None, db
     if not workflow:
         raise HTTPException(status_code=404, detail="Flujo no encontrado")
 
-    # Archivar flujos previamente publicados
+    # Archivar flujos previamente publicados (excluyendo el que se está publicando)
     await db.execute(
         update(WorkflowDefinition)
-        .where(WorkflowDefinition.status == "published")
+        .where(WorkflowDefinition.status == "published", WorkflowDefinition.id != wf_uuid)
         .values(status="archived", updated_at=datetime.now(timezone.utc))
     )
 
     # Publicar flujo actual
-    workflow.status = "published"
-    workflow.published_at = datetime.now(timezone.utc)
-    workflow.updated_at = datetime.now(timezone.utc)
+    await db.execute(
+        update(WorkflowDefinition)
+        .where(WorkflowDefinition.id == wf_uuid)
+        .values(
+            status="published",
+            published_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+    )
 
     await db.commit()
     await db.refresh(workflow)

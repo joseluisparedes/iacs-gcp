@@ -148,12 +148,20 @@ class WorkflowEngine:
             )
             if edge:
                 edge_data = edge.get("data", {})
+                allowed_roles = None
+                if "allowed_roles" in edge_data:
+                    allowed_roles = edge_data["allowed_roles"]
+                elif "allowed_roles" in edge:
+                    allowed_roles = edge["allowed_roles"]
+                elif "allowed_roles" in edge_data.get("condition_config", {}):
+                    allowed_roles = edge_data["condition_config"]["allowed_roles"]
+
                 transition = {
                     "target_node_id": edge.get("target"),
                     "label": edge.get("label", transition_label),
                     "condition_type": "always",
                     "condition_config": edge_data.get("condition_config", {}),
-                    "allowed_roles": edge_data.get("allowed_roles") or edge.get("allowed_roles") or []
+                    "allowed_roles": allowed_roles
                 }
 
         # 2b. Buscar si el nodo conecta a una compuerta (Gateway)
@@ -192,17 +200,38 @@ class WorkflowEngine:
             )
 
         # 2c. Validación de roles autorizados a nivel de transición (RBAC de flecha)
-        trans_allowed_roles = []
+        trans_allowed_roles = None
         if isinstance(transition, dict):
             cond_cfg = transition.get("condition_config") or {}
-            trans_allowed_roles = cond_cfg.get("allowed_roles") or transition.get("allowed_roles") or []
-        if trans_allowed_roles and not has_admin:
-            trans_roles_set = {r.strip().lower() for r in trans_allowed_roles if r.strip()}
-            if not user_roles_set.intersection(trans_roles_set):
-                return WorkflowTransitionResult(
-                    allowed=False,
-                    reason=f"Tu rol ({', '.join(user_roles_set)}) no está autorizado para ejecutar la acción '{transition_label}'."
-                )
+            if "allowed_roles" in cond_cfg and cond_cfg["allowed_roles"] is not None:
+                trans_allowed_roles = cond_cfg["allowed_roles"]
+            elif "allowed_roles" in transition and transition["allowed_roles"] is not None:
+                trans_allowed_roles = transition["allowed_roles"]
+
+        # Si la flecha tiene explícitamente configurada la lista de roles autorizados:
+        if trans_allowed_roles is not None:
+            if not has_admin:
+                if isinstance(trans_allowed_roles, list):
+                    clean_allowed = [str(r).strip().lower() for r in trans_allowed_roles if str(r).strip()]
+                    if len(clean_allowed) == 0:
+                        return WorkflowTransitionResult(
+                            allowed=False,
+                            reason=f"La transición '{transition_label}' no tiene roles autorizados asignados (0 roles)."
+                        )
+                    if not user_roles_set.intersection(set(clean_allowed)):
+                        return WorkflowTransitionResult(
+                            allowed=False,
+                            reason=f"Tu rol ({', '.join(user_roles_set)}) no está autorizado para ejecutar la acción '{transition_label}'."
+                        )
+        else:
+            # Si la flecha no tiene 'allowed_roles' explícito, validar contra los roles del nodo origen
+            current_node_roles = [r for r in node_roles if r.get("node_id") == current_node_id]
+            if current_node_roles and not has_admin:
+                if not matched_node_role:
+                    return WorkflowTransitionResult(
+                        allowed=False,
+                        reason=f"Tu rol ({', '.join(user_roles_set)}) no está autorizado para actuar en la etapa actual."
+                    )
 
         # 3. Validación de permisos de Aprobación / Rechazo
         is_rejection = transition_label in ("Rechazar", "Desestimar", "Observar")

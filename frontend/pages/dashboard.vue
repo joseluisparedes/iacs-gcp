@@ -72,6 +72,8 @@ function getBPTI(initiative: Initiative): string {
   const fd = initiative.form_data ?? {};
   return (
     fd.bp_ti_asignado ||
+    fd.bp_ti_responsable ||
+    fd.business_partner ||
     fd.bp_ti ||
     fd.bp ||
     ""

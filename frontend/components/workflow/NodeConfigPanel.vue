@@ -12,6 +12,8 @@ import {
   Clock,
   Send,
   AlertTriangle,
+  AlertCircle,
+  GitCommit,
   CheckCircle2,
   Archive,
   Search,
@@ -27,6 +29,7 @@ import {
   ExternalLink,
   Plus
 } from 'lucide-vue-next';
+import { DEFAULT_MACRO_STAGES, type MacroStageDef } from '~/utils/macroStages';
 
 interface DynamicRole {
   id?: string;
@@ -65,6 +68,7 @@ const props = withDefaults(defineProps<{
   documentTemplates?: any[];
   systemRoles?: DynamicRole[];
   users?: SystemUser[];
+  macroStages?: MacroStageDef[];
 }>(), {
   nodes: () => [],
   edges: () => [],
@@ -73,12 +77,14 @@ const props = withDefaults(defineProps<{
   documentTemplates: () => [],
   systemRoles: () => [],
   users: () => [],
+  macroStages: () => [],
 });
 
 const emit = defineEmits<{
   (e: 'update-node', payload: any): void;
   (e: 'update-edge', payload: any): void;
   (e: 'delete-selected'): void;
+  (e: 'open-macro-stages-modal'): void;
 }>();
 
 const activeTab = ref<'props' | 'roles' | 'custody' | 'ai'>('props');
@@ -206,6 +212,70 @@ const incomingEdges = computed(() => {
   return props.edges.filter((e) => e.target === props.selectedNode.id);
 });
 
+// Macro-Etapas configuradas activas en el flujo (Stepper)
+const configuredMacroStages = computed<MacroStageDef[]>(() => {
+  if (Array.isArray(props.macroStages) && props.macroStages.length > 0) {
+    return props.macroStages;
+  }
+  return DEFAULT_MACRO_STAGES;
+});
+
+// Comprueba si el nodo seleccionado es la cabecera principal de una Macro-Etapa
+const isSelfMacroStage = computed(() => {
+  if (!props.selectedNode) return null;
+  const currentId = props.selectedNode.id;
+  const stages = configuredMacroStages.value;
+  const idx = stages.findIndex(s => s.id === currentId);
+  if (idx !== -1) {
+    return {
+      index: idx + 1,
+      stage: stages[idx]
+    };
+  }
+  return null;
+});
+
+// Comprueba si el nodo seleccionado es un sub-estado subordinado a alguna Macro-Etapa
+const parentStageInfo = computed(() => {
+  if (!props.selectedNode) return null;
+  const currentId = props.selectedNode.id;
+  const stages = configuredMacroStages.value;
+
+  // Si ya es cabecera principal, no es sub-estado
+  if (stages.some(s => s.id === currentId)) return null;
+
+  // 1. Revisar parent_stage_id directo
+  const parentId = props.selectedNode.data?.parent_stage_id;
+  if (parentId) {
+    const idx = stages.findIndex(s => s.id === parentId);
+    if (idx !== -1) {
+      return { index: idx + 1, id: stages[idx].id, name: stages[idx].name };
+    }
+  }
+
+  // 2. Revisar si está en los nodeIds de alguna etapa
+  const idx = stages.findIndex(s => s.id !== currentId && Array.isArray(s.nodeIds) && s.nodeIds.includes(currentId));
+  if (idx !== -1) {
+    return { index: idx + 1, id: stages[idx].id, name: stages[idx].name };
+  }
+
+  return null;
+});
+
+// Nodos candidatos adicionales que no están en la lista de macro-etapas
+const availableOtherNodes = computed(() => {
+  if (!props.selectedNode) return [];
+  const currentId = props.selectedNode.id;
+  const macroIds = new Set(configuredMacroStages.value.map(s => s.id));
+  return (props.nodes || [])
+    .filter((n: any) => n.id !== currentId && n.type !== 'gateway' && !n.id.startsWith('gw_') && !macroIds.has(n.id))
+    .map((n: any) => ({
+      id: n.id,
+      label: n.data?.label || n.id,
+      role: n.data?.roles?.[0]?.role_name || '',
+    }));
+});
+
 // Actualizar un campo del nodo seleccionado
 const updateField = (key: string, value: any) => {
   if (!props.selectedNode) return;
@@ -298,6 +368,44 @@ const toggleEdgeRole = (roleCode: string) => {
   updateEdgeField('allowed_roles', current);
 };
 
+// Search, filter and fast-action helpers for Edge RBAC Roles
+const edgeRoleSearch = ref('');
+const edgeRoleFilterTab = ref<'all' | 'selected'>('all');
+
+const getRoleDisplayName = (code: string) => {
+  const found = availableRoles.value.find(r => r.code === code);
+  return found?.name || code;
+};
+
+const clearAllEdgeRoles = () => {
+  if (!props.selectedEdge) return;
+  updateEdgeField('allowed_roles', []);
+};
+
+const selectAllEdgeRoles = () => {
+  if (!props.selectedEdge) return;
+  updateEdgeField('allowed_roles', availableRoles.value.map(r => r.code));
+};
+
+const removeEdgeRole = (roleCode: string) => {
+  if (!props.selectedEdge) return;
+  const current = (edgeData.value.allowed_roles || []).filter((c: string) => c !== roleCode);
+  updateEdgeField('allowed_roles', current);
+};
+
+const filteredAvailableRoles = computed(() => {
+  let list = availableRoles.value;
+  const q = edgeRoleSearch.value.trim().toLowerCase();
+  if (q) {
+    list = list.filter(r => r.name.toLowerCase().includes(q) || r.code.toLowerCase().includes(q));
+  }
+  if (edgeRoleFilterTab.value === 'selected') {
+    const selectedCodes = edgeData.value.allowed_roles || [];
+    list = list.filter(r => selectedCodes.includes(r.code));
+  }
+  return list;
+});
+
 // Color Presets para Flechas
 const applyColorPreset = (preset: any) => {
   if (!props.selectedEdge) return;
@@ -341,6 +449,12 @@ const gatewayConfig = computed(() => {
   };
 });
 
+const getRuleForEdge = (edge: any) => {
+  if (!edge) return null;
+  const rules: any[] = gatewayConfig.value.rules || [];
+  return rules.find((r: any) => r.edgeId === edge.id || (edge.target && r.targetNodeId === edge.target)) || null;
+};
+
 const updateGatewayConfig = (updates: any) => {
   updateField('gatewayConfig', {
     ...gatewayConfig.value,
@@ -350,14 +464,14 @@ const updateGatewayConfig = (updates: any) => {
 
 const updateBranchRule = (edgeId: string, targetNodeId: string, updates: any) => {
   const currentRules: any[] = gatewayConfig.value.rules || [];
-  const idx = currentRules.findIndex((r: any) => r.edgeId === edgeId || r.targetNodeId === targetNodeId);
+  const idx = currentRules.findIndex((r: any) => r.edgeId === edgeId || (targetNodeId && r.targetNodeId === targetNodeId));
   let nextRules: any[];
   if (idx >= 0) {
-    nextRules = currentRules.map((r, i) => (i === idx ? { ...r, ...updates } : r));
+    nextRules = currentRules.map((r, i) => (i === idx ? { ...r, edgeId, targetNodeId, ...updates } : r));
   } else {
     nextRules = [
       ...currentRules,
-      { edgeId, targetNodeId, operator: 'equals', value: 'Sí', ...updates },
+      { edgeId, targetNodeId, operator: 'equals', value: '', ...updates },
     ];
   }
   updateGatewayConfig({ rules: nextRules });
@@ -385,6 +499,213 @@ const SYSTEM_GATEWAY_VARIABLES = [
   { key: 'direccion', label: 'Dirección (direccion)' },
   { key: 'pilar_estrategico', label: 'Pilar Estratégico (pilar_estrategico)' },
 ];
+
+// Helper to resolve stage form for a given node
+const getNodeStageForm = (node: any) => {
+  if (!node) return null;
+  const formRef = node.data?.form_id;
+  if (!formRef) return null;
+  return (props.stageForms || []).find((f: any) => f.id === formRef || f.code === formRef) || null;
+};
+
+// Direct Incoming Nodes to the Gateway
+const directIncomingNodes = computed(() => {
+  if (!props.selectedNode) return [];
+  const currentId = props.selectedNode.id;
+  const inEdges = (props.edges || []).filter((e: any) => e.target === currentId);
+  const sourceIds = Array.from(new Set(inEdges.map((e: any) => e.source)));
+  return sourceIds
+    .map(id => (props.nodes || []).find((n: any) => n.id === id))
+    .filter(Boolean);
+});
+
+// Direct incoming forms with their nodes
+const directIncomingFormItems = computed(() => {
+  return directIncomingNodes.value.map((node: any) => {
+    const form = getNodeStageForm(node);
+    return {
+      nodeId: node.id,
+      nodeLabel: node.data?.label || node.id,
+      form,
+    };
+  });
+});
+
+// Upstream Nodes (BFS backwards traversal through props.edges)
+const upstreamNodes = computed(() => {
+  if (!props.selectedNode) return [];
+  const directIds = new Set(directIncomingNodes.value.map((n: any) => n.id));
+  const visited = new Set<string>();
+  const queue: string[] = [];
+
+  directIds.forEach(id => {
+    visited.add(id);
+    queue.push(id);
+  });
+
+  const result: any[] = [];
+
+  while (queue.length > 0) {
+    const currentId = queue.shift()!;
+    const incomingToCurrent = (props.edges || []).filter((e: any) => e.target === currentId);
+    for (const edge of incomingToCurrent) {
+      if (edge.source && !visited.has(edge.source) && edge.source !== props.selectedNode.id) {
+        visited.add(edge.source);
+        const sourceNode = (props.nodes || []).find((n: any) => n.id === edge.source);
+        if (sourceNode) {
+          result.push(sourceNode);
+          queue.push(edge.source);
+        }
+      }
+    }
+  }
+
+  return result;
+});
+
+// Grouped variables for the Gateway decision dropdown
+interface GatewayVarOption {
+  key: string;
+  label: string;
+  type?: string;
+  sourceLabel?: string;
+}
+
+interface GatewayVarGroup {
+  id: string;
+  label: string;
+  options: GatewayVarOption[];
+}
+
+const gatewayVariableGroups = computed<GatewayVarGroup[]>(() => {
+  const groups: GatewayVarGroup[] = [];
+  const addedKeys = new Set<string>();
+
+  // 1. Direct Incoming Node Forms
+  directIncomingNodes.value.forEach((node: any) => {
+    const form = getNodeStageForm(node);
+    const nodeLabel = node.data?.label || node.id;
+    if (form && Array.isArray(form.fields) && form.fields.length > 0) {
+      const opts: GatewayVarOption[] = [];
+      form.fields.forEach((f: any) => {
+        const key = f.key || f.id;
+        if (key && !addedKeys.has(key)) {
+          addedKeys.add(key);
+          const typeBadge = f.type ? ` [${f.type}]` : '';
+          opts.push({
+            key,
+            label: `${f.label || f.name || key}${typeBadge} (${key})`,
+            type: f.type,
+            sourceLabel: `${nodeLabel} - ${form.name}`,
+          });
+        }
+      });
+      if (opts.length > 0) {
+        groups.push({
+          id: `direct-${node.id}`,
+          label: `📥 Entrada Directa: ${nodeLabel} (${form.name})`,
+          options: opts,
+        });
+      }
+    }
+  });
+
+  // 2. Upstream Node Forms
+  upstreamNodes.value.forEach((node: any) => {
+    const form = getNodeStageForm(node);
+    const nodeLabel = node.data?.label || node.id;
+    if (form && Array.isArray(form.fields) && form.fields.length > 0) {
+      const opts: GatewayVarOption[] = [];
+      form.fields.forEach((f: any) => {
+        const key = f.key || f.id;
+        if (key && !addedKeys.has(key)) {
+          addedKeys.add(key);
+          const typeBadge = f.type ? ` [${f.type}]` : '';
+          opts.push({
+            key,
+            label: `${f.label || f.name || key}${typeBadge} (${key})`,
+            type: f.type,
+            sourceLabel: `${nodeLabel} - ${form.name}`,
+          });
+        }
+      });
+      if (opts.length > 0) {
+        groups.push({
+          id: `upstream-${node.id}`,
+          label: `🔄 Ruta Previa: ${nodeLabel} (${form.name})`,
+          options: opts,
+        });
+      }
+    }
+  });
+
+  // 3. Other Stage Forms (Forms not on the direct path but active in the system)
+  (props.stageForms || []).forEach((form: any) => {
+    if (Array.isArray(form.fields)) {
+      const remainingOpts: GatewayVarOption[] = [];
+      form.fields.forEach((f: any) => {
+        const key = f.key || f.id;
+        if (key && !addedKeys.has(key)) {
+          addedKeys.add(key);
+          const typeBadge = f.type ? ` [${f.type}]` : '';
+          remainingOpts.push({
+            key,
+            label: `${f.label || f.name || key}${typeBadge} (${key})`,
+            type: f.type,
+            sourceLabel: form.name,
+          });
+        }
+      });
+      if (remainingOpts.length > 0) {
+        groups.push({
+          id: `other-form-${form.id || form.code}`,
+          label: `📄 Formulario: ${form.name}`,
+          options: remainingOpts,
+        });
+      }
+    }
+  });
+
+  // 4. Global Initiative Attributes
+  const globalOpts: GatewayVarOption[] = [];
+  SYSTEM_GATEWAY_VARIABLES.forEach((v) => {
+    if (!addedKeys.has(v.key)) {
+      addedKeys.add(v.key);
+      globalOpts.push({
+        key: v.key,
+        label: v.label,
+        type: 'global',
+        sourceLabel: 'Iniciativa',
+      });
+    }
+  });
+  if (globalOpts.length > 0) {
+    groups.push({
+      id: 'globals',
+      label: '📋 Otros Campos de la Iniciativa',
+      options: globalOpts,
+    });
+  }
+
+  return groups;
+});
+
+// Check if a variable key is found in any group
+const isVariableInGroups = (varKey: string) => {
+  if (!varKey) return false;
+  return gatewayVariableGroups.value.some(g => g.options.some(o => o.key === varKey));
+};
+
+// Selected variable details
+const selectedVarInfo = computed(() => {
+  const currentKey = gatewayConfig.value.variable;
+  if (!currentKey) return null;
+  for (const g of gatewayVariableGroups.value) {
+    const found = g.options.find(o => o.key === currentKey);
+    if (found) return { ...found, groupLabel: g.label };
+  }
+  return { key: currentKey, label: currentKey, type: 'custom', groupLabel: 'Personalizado' };
+});
 </script>
 
 <template>
@@ -474,27 +795,96 @@ const SYSTEM_GATEWAY_VARIABLES = [
           />
         </div>
 
-        <!-- Selector Dinámico de Variable -->
+        <!-- Selector Dinámico de Variable Basado en Formularios Entrantes -->
         <div class="p-3 bg-amber-50/80 border border-amber-200/90 rounded-xl space-y-2.5 shadow-xs">
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-1.5 text-amber-950 font-bold text-xs">
               <GitFork class="w-3.5 h-3.5 text-amber-600" />
               <span>Variable de Evaluación</span>
             </div>
+            <span v-if="directIncomingNodes.length > 0" class="text-[9px] font-bold text-amber-800 bg-amber-200/80 px-1.5 py-0.5 rounded border border-amber-300">
+              {{ directIncomingNodes.length }} nodo{{ directIncomingNodes.length > 1 ? 's' : '' }} input
+            </span>
           </div>
+
           <p class="text-[10px] text-amber-900/80 leading-tight">
-            Selecciona el campo de la iniciativa que se evaluará para bifurcar el flujo de trabajo:
+            Selecciona el campo de los formularios que entran como input a esta caja para bifurcar el flujo:
           </p>
-          <select
-            :value="gatewayConfig.variable || ''"
-            @change="updateGatewayConfig({ variable: ($event.target as HTMLSelectElement).value })"
-            class="w-full px-2.5 py-1.5 bg-white border border-amber-300 rounded-lg text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500"
-          >
-            <option value="">-- Seleccionar Variable --</option>
-            <option v-for="v in SYSTEM_GATEWAY_VARIABLES" :key="v.key" :value="v.key">
-              {{ v.label }}
-            </option>
-          </select>
+
+          <!-- Badges de Nodos y Formularios de Entrada Directa -->
+          <div v-if="directIncomingFormItems.length > 0" class="space-y-1">
+            <div
+              v-for="item in directIncomingFormItems"
+              :key="item.nodeId"
+              class="px-2 py-1 bg-white border border-amber-200/90 rounded-lg text-[10px] text-slate-700 shadow-2xs"
+            >
+              <div class="flex items-center gap-1.5">
+                <ArrowRight class="w-3 h-3 text-amber-600 shrink-0" />
+                <span class="font-bold text-slate-800 truncate">{{ item.nodeLabel }}</span>
+              </div>
+              <div v-if="item.form" class="mt-0.5 pl-4 text-[9px] text-amber-700 flex items-center justify-between">
+                <span class="truncate">📄 {{ item.form.name }}</span>
+                <span class="font-medium bg-amber-100 text-amber-800 px-1 rounded shrink-0">
+                  {{ item.form.fields?.length || 0 }} campos
+                </span>
+              </div>
+              <div v-else class="mt-0.5 pl-4 text-[9px] text-slate-400 italic">
+                (Sin formulario asignado en este nodo)
+              </div>
+            </div>
+          </div>
+          <div v-else class="px-2 py-1.5 bg-amber-100/60 border border-amber-300 rounded-lg text-[10px] text-amber-900 flex items-center gap-1.5">
+            <AlertCircle class="w-3.5 h-3.5 text-amber-600 shrink-0" />
+            <span>Sin flechas entrantes a esta compuerta. Conecta un nodo previo para captar sus campos.</span>
+          </div>
+
+          <!-- Select con grupos dinámicos (Entrada Directa, Ruta Previa, etc.) -->
+          <div>
+            <label class="block text-[10px] font-semibold text-amber-950 mb-1">
+              Campo del formulario a evaluar:
+            </label>
+            <select
+              :value="gatewayConfig.variable || ''"
+              @change="updateGatewayConfig({ variable: ($event.target as HTMLSelectElement).value })"
+              class="w-full px-2.5 py-1.5 bg-white border border-amber-300 rounded-lg text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500 shadow-2xs"
+            >
+              <option value="">-- Seleccionar Variable de Decisión --</option>
+              
+              <!-- Variable actual preservada si no está en ningún grupo -->
+              <option
+                v-if="gatewayConfig.variable && !isVariableInGroups(gatewayConfig.variable)"
+                :value="gatewayConfig.variable"
+              >
+                ⭐ {{ gatewayConfig.variable }} (Selección actual)
+              </option>
+
+              <!-- Optgroups dinámicos -->
+              <optgroup
+                v-for="grp in gatewayVariableGroups"
+                :key="grp.id"
+                :label="grp.label"
+              >
+                <option
+                  v-for="opt in grp.options"
+                  :key="opt.key"
+                  :value="opt.key"
+                >
+                  {{ opt.label }}
+                </option>
+              </optgroup>
+            </select>
+          </div>
+
+          <!-- Variable Activa Feedback -->
+          <div v-if="gatewayConfig.variable" class="flex items-center justify-between pt-1 border-t border-amber-200/70 text-[10px]">
+            <span class="text-slate-500">Variable activa:</span>
+            <div class="flex items-center gap-1 font-mono font-bold text-amber-900 bg-amber-100/80 border border-amber-200 px-1.5 py-0.5 rounded">
+              <span>{{ gatewayConfig.variable }}</span>
+              <span v-if="selectedVarInfo?.type" class="text-[8px] uppercase px-1 py-0.2 rounded bg-amber-200 text-amber-800">
+                {{ selectedVarInfo.type }}
+              </span>
+            </div>
+          </div>
         </div>
 
         <!-- Ramas de Salida y Reglas -->
@@ -539,7 +929,7 @@ const SYSTEM_GATEWAY_VARIABLES = [
                 <div>
                   <span class="text-[10px] text-slate-500 font-semibold block mb-0.5">Operador:</span>
                   <select
-                    :value="(gatewayConfig.rules?.find((r: any) => r.edgeId === edge.id)?.operator) || 'equals'"
+                    :value="getRuleForEdge(edge)?.operator || 'equals'"
                     @change="updateBranchRule(edge.id, edge.target, { operator: ($event.target as HTMLSelectElement).value })"
                     class="w-full px-2 py-1 bg-white border border-slate-200 rounded-lg text-[11px] font-medium"
                   >
@@ -554,7 +944,7 @@ const SYSTEM_GATEWAY_VARIABLES = [
                   <span class="text-[10px] text-slate-500 font-semibold block mb-0.5">Valor esperado:</span>
                   <input
                     type="text"
-                    :value="(gatewayConfig.rules?.find((r: any) => r.edgeId === edge.id)?.value) || ''"
+                    :value="getRuleForEdge(edge)?.value ?? ''"
                     @input="updateBranchRule(edge.id, edge.target, { value: ($event.target as HTMLInputElement).value })"
                     placeholder="Ej: Sí, No, 50000"
                     class="w-full px-2 py-1 bg-white border border-slate-200 rounded-lg text-[11px] font-bold text-slate-800 focus:ring-1 focus:ring-amber-400"
@@ -585,7 +975,7 @@ const SYSTEM_GATEWAY_VARIABLES = [
                 <label class="flex items-center gap-1 text-[10px] text-slate-600 font-semibold cursor-pointer">
                   <input
                     type="checkbox"
-                    :checked="Boolean(gatewayConfig.rules?.find((r: any) => r.edgeId === edge.id)?.isDefault)"
+                    :checked="Boolean(getRuleForEdge(edge)?.isDefault)"
                     @change="updateBranchRule(edge.id, edge.target, { isDefault: ($event.target as HTMLInputElement).checked })"
                     class="w-3 h-3 text-amber-600 rounded cursor-pointer"
                   />
@@ -987,6 +1377,88 @@ const SYSTEM_GATEWAY_VARIABLES = [
                   </div>
                 </div>
               </div>
+            </div>
+          </div>
+
+          <!-- 2.B UBICACIÓN EN STEPPER (INFORMATIVO DE SOLO LECTURA) -->
+          <div class="p-3 bg-slate-50 border border-slate-200/90 rounded-xl space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="text-[11px] font-bold text-slate-700 flex items-center gap-1.5">
+                <Layers class="w-3.5 h-3.5 text-[#4F5AF5]" />
+                Ubicación en Stepper (Riel de Avance)
+              </span>
+              <button
+                type="button"
+                @click="emit('open-macro-stages-modal')"
+                class="text-[10px] text-indigo-600 hover:text-indigo-800 font-bold inline-flex items-center gap-1 cursor-pointer transition-colors"
+                title="Configurar etapas y sub-estados en el gestor central"
+              >
+                <Settings2 class="w-3 h-3 text-indigo-600" />
+                <span>Gestionar</span>
+              </button>
+            </div>
+
+            <!-- Caso 1: Es Cabecera Principal de una Macro-Etapa -->
+            <div
+              v-if="isSelfMacroStage"
+              class="flex items-center justify-between p-2.5 rounded-lg bg-indigo-50/90 border border-indigo-200/90 text-indigo-950 text-xs shadow-2xs gap-2"
+            >
+              <div class="flex items-center gap-2.5 min-w-0 flex-1">
+                <span class="w-5 h-5 rounded-md bg-[#0D253F] text-white font-extrabold text-[10px] flex items-center justify-center shrink-0">
+                  {{ isSelfMacroStage.index }}
+                </span>
+                <div class="min-w-0 flex-1">
+                  <span class="font-bold block text-xs text-indigo-950 break-words leading-snug">
+                    Etapa {{ isSelfMacroStage.index }}: {{ isSelfMacroStage.stage.name }}
+                  </span>
+                  <span class="text-[10px] text-indigo-700 font-medium">Cabecera Principal del Stepper</span>
+                </div>
+              </div>
+              <span class="text-[9px] px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800 font-bold border border-indigo-200 shrink-0">
+                Principal
+              </span>
+            </div>
+
+            <!-- Caso 2: Es Sub-estado subordinado a una Macro-Etapa -->
+            <div
+              v-else-if="parentStageInfo"
+              class="flex items-center justify-between p-2.5 rounded-lg bg-emerald-50/80 border border-emerald-200/80 text-emerald-950 text-xs shadow-2xs gap-2"
+            >
+              <div class="flex items-center gap-2.5 min-w-0 flex-1">
+                <GitCommit class="w-4 h-4 text-emerald-600 shrink-0" />
+                <div class="min-w-0 flex-1">
+                  <span class="font-bold block text-xs text-emerald-950 break-words leading-snug">
+                    Sub-estado de: {{ parentStageInfo.name }}
+                  </span>
+                  <span class="text-[10px] text-emerald-700 font-medium">Etapa #{{ parentStageInfo.index }} en el Stepper</span>
+                </div>
+              </div>
+              <span class="text-[9px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold border border-emerald-200 shrink-0">
+                Sub-estado
+              </span>
+            </div>
+
+            <!-- Caso 3: Es Estado Independiente / No Agrupado -->
+            <div
+              v-else
+              class="flex items-center justify-between p-2.5 rounded-lg bg-amber-50/70 border border-amber-200/80 text-amber-950 text-xs shadow-2xs gap-2"
+            >
+              <div class="flex items-center gap-2.5 min-w-0 flex-1">
+                <AlertCircle class="w-4 h-4 text-amber-600 shrink-0" />
+                <div class="min-w-0 flex-1">
+                  <span class="font-bold block text-xs text-amber-950 break-words leading-snug">
+                    Estado Independiente
+                  </span>
+                  <span class="text-[10px] text-amber-700 font-medium">Transversal (no secuencial)</span>
+                </div>
+              </div>
+              <button
+                type="button"
+                @click="emit('open-macro-stages-modal')"
+                class="text-[9px] px-2 py-0.5 rounded-full bg-amber-200/80 hover:bg-amber-300 text-amber-900 font-bold border border-amber-300 shrink-0 cursor-pointer transition-colors"
+              >
+                + Asignar
+              </button>
             </div>
           </div>
 
@@ -1533,39 +2005,174 @@ const SYSTEM_GATEWAY_VARIABLES = [
         </div>
 
         <!-- 2. Roles Autorizados (Transition RBAC) -->
-        <div class="space-y-1.5">
+        <div class="space-y-2">
           <div class="flex items-center justify-between">
             <label class="block text-[11px] font-bold text-slate-700">
               Roles Autorizados (Transition RBAC)
             </label>
-            <span class="text-[10px] font-bold text-[#EB5F46] bg-[#FFF0ED] px-2 py-0.5 rounded-full border border-[#FCD9D2]">
-              {{ (edgeData.allowed_roles || []).length }} roles
-            </span>
+            <div class="flex items-center gap-1.5">
+              <span
+                :class="[
+                  'text-[10px] font-bold px-2 py-0.5 rounded-full border transition-all',
+                  (edgeData.allowed_roles || []).length > 0
+                    ? 'text-indigo-700 bg-indigo-50 border-indigo-200 shadow-2xs'
+                    : 'text-amber-700 bg-amber-50 border-amber-200'
+                ]"
+              >
+                {{ (edgeData.allowed_roles || []).length }} seleccionados
+              </span>
+            </div>
           </div>
+
           <p class="text-[10px] text-slate-500 leading-tight">
             Solo los usuarios con al menos uno de los roles seleccionados verán el botón de acción para esta transición.
           </p>
 
-          <div class="space-y-1 max-h-44 overflow-y-auto border border-slate-200 rounded-xl p-2 bg-slate-50/60 custom-scrollbar">
-            <label
-              v-for="r in availableRoles"
-              :key="r.code"
-              :class="[
-                'flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs cursor-pointer transition-colors select-none',
-                (edgeData.allowed_roles || []).includes(r.code)
-                  ? 'bg-indigo-50 text-indigo-900 font-semibold border border-indigo-200'
-                  : 'hover:bg-slate-100 text-slate-700'
-              ]"
-            >
-              <input
-                type="checkbox"
-                :checked="(edgeData.allowed_roles || []).includes(r.code)"
-                @change="toggleEdgeRole(r.code)"
-                class="rounded border-slate-300 text-[#4F5AF5] focus:ring-[#4F5AF5]"
-              />
-              <span class="truncate flex-1 font-medium">{{ r.name }}</span>
-              <span class="text-[9px] text-slate-400 font-mono">{{ r.code }}</span>
-            </label>
+          <!-- BANDEJA DE ROLES ACTIVOS (VISTA INMEDIATA SIN SCROLL NI ADIVINANZAS) -->
+          <div
+            v-if="(edgeData.allowed_roles || []).length > 0"
+            class="p-2.5 bg-gradient-to-br from-indigo-50/90 to-slate-50 border border-indigo-100 rounded-xl space-y-1.5 shadow-2xs"
+          >
+            <div class="flex items-center justify-between text-[10px]">
+              <span class="font-extrabold text-indigo-900 uppercase tracking-wider flex items-center gap-1">
+                <CheckCircle2 class="w-3.5 h-3.5 text-indigo-600" />
+                Roles activos ({{ (edgeData.allowed_roles || []).length }}):
+              </span>
+              <button
+                type="button"
+                @click="clearAllEdgeRoles"
+                class="text-[10px] font-semibold text-rose-600 hover:text-rose-700 hover:underline cursor-pointer"
+                title="Deseleccionar todos los roles"
+              >
+                Limpiar todos
+              </button>
+            </div>
+
+            <!-- Chips de roles seleccionados con botón de quitar directo -->
+            <div class="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto custom-scrollbar p-0.5">
+              <span
+                v-for="code in (edgeData.allowed_roles || [])"
+                :key="code"
+                class="inline-flex items-center gap-1.5 pl-2 pr-1 py-0.5 rounded-lg text-[11px] font-semibold bg-white border border-indigo-200 text-indigo-900 shadow-2xs group hover:border-rose-300 transition-colors"
+              >
+                <span>{{ getRoleDisplayName(code) }}</span>
+                <button
+                  type="button"
+                  @click.stop="removeEdgeRole(code)"
+                  class="w-3.5 h-3.5 rounded-full hover:bg-rose-100 hover:text-rose-600 text-slate-400 flex items-center justify-center transition-colors cursor-pointer"
+                  :title="`Quitar rol ${getRoleDisplayName(code)}`"
+                >
+                  <X class="w-2.5 h-2.5 stroke-[2.5]" />
+                </button>
+              </span>
+            </div>
+          </div>
+
+          <!-- AVISO CUANDO NO HAY ROLES SELECCIONADOS (0 ROLES) -->
+          <div
+            v-else
+            class="flex items-center gap-2 p-2.5 bg-amber-50/80 border border-amber-200/80 rounded-xl text-[10px] text-amber-800"
+          >
+            <AlertCircle class="w-3.5 h-3.5 text-amber-600 shrink-0" />
+            <span class="leading-tight font-medium">
+              Ningún rol seleccionado. Este botón estará <strong>oculto para todos</strong> (solo visible para Administradores).
+            </span>
+          </div>
+
+          <!-- BARRA DE HERRAMIENTAS: Búsqueda y Filtro Rápido (Todos vs Solo Activos) -->
+          <div class="space-y-1.5 pt-0.5">
+            <div class="flex items-center gap-1.5">
+              <!-- Buscador -->
+              <div class="relative flex-1">
+                <Search class="w-3 h-3 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  v-model="edgeRoleSearch"
+                  type="text"
+                  placeholder="Buscar rol por nombre o código..."
+                  class="w-full pl-7 pr-6 py-1 bg-white border border-slate-200 rounded-lg text-[11px] text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 transition-all"
+                />
+                <button
+                  v-if="edgeRoleSearch"
+                  @click="edgeRoleSearch = ''"
+                  type="button"
+                  class="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                >
+                  <X class="w-2.5 h-2.5" />
+                </button>
+              </div>
+
+              <!-- Pestañas Filtro: Todos vs Solo Seleccionados -->
+              <div class="flex items-center bg-slate-100 rounded-lg p-0.5 border border-slate-200 shrink-0">
+                <button
+                  type="button"
+                  @click="edgeRoleFilterTab = 'all'"
+                  :class="[
+                    'px-2 py-0.5 text-[10px] font-bold rounded-md transition-all cursor-pointer',
+                    edgeRoleFilterTab === 'all'
+                      ? 'bg-white text-indigo-700 shadow-2xs font-extrabold'
+                      : 'text-slate-600 hover:text-slate-900'
+                  ]"
+                >
+                  Todos ({{ availableRoles.length }})
+                </button>
+                <button
+                  type="button"
+                  @click="edgeRoleFilterTab = 'selected'"
+                  :class="[
+                    'px-2 py-0.5 text-[10px] font-bold rounded-md transition-all cursor-pointer flex items-center gap-1',
+                    edgeRoleFilterTab === 'selected'
+                      ? 'bg-white text-indigo-700 shadow-2xs font-extrabold'
+                      : 'text-slate-600 hover:text-slate-900'
+                  ]"
+                >
+                  <span>Activos</span>
+                  <span
+                    v-if="(edgeData.allowed_roles || []).length > 0"
+                    class="w-4 h-4 rounded-full bg-indigo-600 text-white text-[9px] flex items-center justify-center font-bold"
+                  >
+                    {{ (edgeData.allowed_roles || []).length }}
+                  </span>
+                </button>
+              </div>
+            </div>
+
+            <!-- LISTA DE CHECKBOXES CON SCROLL Y RESALTADO -->
+            <div class="space-y-1 max-h-40 overflow-y-auto border border-slate-200 rounded-xl p-1.5 bg-slate-50/60 custom-scrollbar">
+              <label
+                v-for="r in filteredAvailableRoles"
+                :key="r.code"
+                :class="[
+                  'flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs cursor-pointer transition-all select-none',
+                  (edgeData.allowed_roles || []).includes(r.code)
+                    ? 'bg-indigo-50/90 text-indigo-950 font-semibold border border-indigo-200 shadow-2xs'
+                    : 'hover:bg-slate-100 text-slate-700 border border-transparent'
+                ]"
+              >
+                <input
+                  type="checkbox"
+                  :checked="(edgeData.allowed_roles || []).includes(r.code)"
+                  @change="toggleEdgeRole(r.code)"
+                  class="rounded border-slate-300 text-[#4F5AF5] focus:ring-[#4F5AF5] shrink-0"
+                />
+                <span class="truncate flex-1 font-medium">{{ r.name }}</span>
+                <span
+                  v-if="(edgeData.allowed_roles || []).includes(r.code)"
+                  class="text-[9px] font-bold text-indigo-700 bg-indigo-100 px-1.5 py-0.5 rounded uppercase tracking-wider shrink-0"
+                >
+                  Activo
+                </span>
+                <span v-else class="text-[9px] text-slate-400 font-mono shrink-0">{{ r.code }}</span>
+              </label>
+
+              <!-- Mensaje vacío si la búsqueda o filtro no da resultados -->
+              <div
+                v-if="filteredAvailableRoles.length === 0"
+                class="py-4 text-center text-slate-400 text-xs italic"
+              >
+                <span v-if="edgeRoleFilterTab === 'selected'">No hay roles activos seleccionados.</span>
+                <span v-else>No se encontraron roles coincidentes con "{{ edgeRoleSearch }}".</span>
+              </div>
+            </div>
           </div>
         </div>
 

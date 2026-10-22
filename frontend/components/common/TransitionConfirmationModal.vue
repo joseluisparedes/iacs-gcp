@@ -21,6 +21,9 @@ const props = withDefaults(
     isSubmitting?: boolean;
     confirmText?: string;
     cancelText?: string;
+    consentStatement?: string;
+    consentTitle?: string;
+    consentAccepted?: boolean;
   }>(),
   {
     title: '¿Estás seguro de la acción que estás realizando?',
@@ -31,12 +34,16 @@ const props = withDefaults(
     isSubmitting: false,
     confirmText: 'Aceptar',
     cancelText: 'Regresar',
+    consentStatement: '',
+    consentTitle: '',
+    consentAccepted: false,
   }
 );
 
 const emit = defineEmits<{
   (e: 'confirm'): void;
   (e: 'cancel'): void;
+  (e: 'update:consent', val: boolean): void;
 }>();
 
 const handleBackdropClick = (e: MouseEvent) => {
@@ -142,6 +149,41 @@ const handleBackdropClick = (e: MouseEvent) => {
               </div>
             </div>
 
+            <!-- Consentimiento de Etapa Formal Integrado (si aplica) -->
+            <div
+              v-if="consentStatement"
+              :class="[
+                'p-3.5 rounded-2xl border text-left transition-all space-y-2',
+                consentAccepted
+                  ? 'bg-emerald-50/50 border-emerald-300'
+                  : 'bg-indigo-50/60 border-indigo-200'
+              ]"
+            >
+              <label class="flex items-start gap-3 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  :checked="consentAccepted"
+                  @change="emit('update:consent', ($event.target as HTMLInputElement).checked)"
+                  class="mt-1 w-5 h-5 rounded-md text-[#4F5AF5] border-indigo-300 focus:ring-[#4F5AF5] cursor-pointer shrink-0"
+                />
+                <div class="space-y-1 min-w-0 flex-1">
+                  <span class="block text-xs font-bold text-slate-900 leading-tight">
+                    {{ consentTitle || 'Declaración de Consentimiento y Visto Bueno' }}
+                  </span>
+                  <p class="text-[11px] text-slate-700 italic bg-white/80 p-2.5 rounded-xl border border-indigo-100">
+                    “{{ consentStatement }}”
+                  </p>
+                  <p v-if="consentAccepted" class="text-[11px] font-bold text-emerald-700 flex items-center gap-1">
+                    <Check class="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Conformidad otorgada</span>
+                  </p>
+                  <p v-else class="text-[11px] text-slate-400 font-medium">
+                    Marca esta casilla para validar y otorgar tu conformidad.
+                  </p>
+                </div>
+              </label>
+            </div>
+
             <!-- Advertencia Institucional de Custodia -->
             <div class="flex items-start gap-2 p-2.5 bg-amber-50/70 border border-amber-200/70 rounded-xl text-left">
               <ShieldAlert class="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
@@ -165,8 +207,8 @@ const handleBackdropClick = (e: MouseEvent) => {
             <button
               type="button"
               @click="emit('confirm')"
-              :disabled="isSubmitting"
-              class="flex-1 py-2.5 px-4 text-xs font-bold text-white bg-[#EB5F46] hover:bg-[#d44830] border border-transparent rounded-xl transition-all shadow-sm shadow-[#EB5F46]/30 flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+              :disabled="isSubmitting || (Boolean(consentStatement) && !consentAccepted)"
+              class="flex-1 py-2.5 px-4 text-xs font-bold text-white bg-[#EB5F46] hover:bg-[#d44830] border border-transparent rounded-xl transition-all shadow-sm shadow-[#EB5F46]/30 flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Check class="w-4 h-4" />
               <span>{{ confirmText }}</span>

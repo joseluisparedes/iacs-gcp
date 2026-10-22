@@ -29,7 +29,6 @@ const details = ref('');
 
 const handleConfirm = () => {
   if (!details.value.trim()) {
-    alert('Debes ingresar el motivo o detalle de la observación.');
     return;
   }
   const categoryFinal = selectedCategory.value === '__custom__'

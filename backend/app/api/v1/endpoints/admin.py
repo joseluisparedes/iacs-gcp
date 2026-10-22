@@ -10,6 +10,7 @@ from app.domain.models import (
 )
 from app.infrastructure.database import get_db
 from app.infrastructure.seeder import seed_database_if_needed
+from app.api.v1.endpoints.auth import build_user_profile_payload
 
 router = APIRouter()
 
@@ -314,16 +315,35 @@ async def save_user(payload: Dict[str, Any], db: AsyncSession = Depends(get_db))
             is_transversal=is_trans,
         ))
 
-    # Sincronizar también con Profile y ProfileRole si existe
-    prof_res = await db.execute(select(Profile).where(Profile.email == email))
+    # Sincronizar también con Profile y ProfileRole
+    prof_res = await db.execute(select(Profile).where(func.lower(Profile.email) == email))
     prof = prof_res.scalar_one_or_none()
+
+    primary_vp_id = None
+    primary_dir_id = None
+    for a in assignments:
+        is_trans = bool(a.get("is_transversal", False) or a.get("role") in ["admin", "entrenador_ia", "ai_trainer"])
+        if not is_trans and a.get("vp_id"):
+            primary_vp_id = a.get("vp_id")
+            if a.get("direcciones_ids") and len(a.get("direcciones_ids")) > 0:
+                primary_dir_id = a.get("direcciones_ids")[0]
+            break
+
     if not prof:
-        prof = Profile(email=email, name=name, is_active=True)
+        prof = Profile(
+            email=email,
+            name=name,
+            vp_id=primary_vp_id,
+            direccion_id=primary_dir_id,
+            is_active=True
+        )
         db.add(prof)
         await db.commit()
         await db.refresh(prof)
     else:
         prof.name = name
+        prof.vp_id = primary_vp_id
+        prof.direccion_id = primary_dir_id
         prof.is_active = True
 
     await db.execute(delete(ProfileRole).where(ProfileRole.profile_id == prof.id))
@@ -340,7 +360,10 @@ async def save_user(payload: Dict[str, Any], db: AsyncSession = Depends(get_db))
         ))
 
     await db.commit()
-    return {"success": True, "id": str(user.id)}
+    await db.refresh(prof)
+
+    user_payload = await build_user_profile_payload(prof, db, user)
+    return {"success": True, "id": str(user.id), "user": user_payload}
 
 
 @router.delete("/users/{id}")

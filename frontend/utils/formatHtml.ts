@@ -48,21 +48,101 @@ export function parseHtmlToMarkdown(text?: string): string {
 }
 
 /**
+ * Sanitiza texto con codificación corrupta heredada (signos de interrogación en lugar de tildes/ñ/¡/¿)
+ */
+export function sanitizeCorruptedEncoding(str?: string): string {
+  if (!str) return '';
+  let s = String(str);
+
+  return s
+    // Signos de exclamación al inicio de frases / saludos
+    .replace(/(^|[.!?\n]\s*)\?Hola!?\s*/gi, '$1¡Hola! ')
+    .replace(/(^|[.!?\n]\s*)\?Excelente!?\s*/gi, '$1¡Excelente! ')
+    .replace(/(^|[.!?\n]\s*)\?Perfecto!?\s*/gi, '$1¡Perfecto! ')
+    .replace(/(^|[.!?\n]\s*)\?Genial!?\s*/gi, '$1¡Genial! ')
+    .replace(/¡Hola!\s*!+/g, '¡Hola! ')
+    .replace(/¡Excelente!\s*!+/g, '¡Excelente! ')
+    .replace(/¡Perfecto!\s*!+/g, '¡Perfecto! ')
+
+    // Interrogación invertida de apertura en preguntas
+    .replace(/\?Cu\?l(?=\s|[.,;:!?]|$)/gi, '¿Cuál')
+    .replace(/\?Cu[aá]l(?=\s|[.,;:!?]|$)/gi, '¿Cuál')
+    .replace(/\?Qu\?(?=\s|[.,;:!?]|$)/gi, '¿Qué')
+    .replace(/\?Qu[eé](?=\s|[.,;:!?]|$)/gi, '¿Qué')
+    .replace(/\?C\?mo(?=\s|[.,;:!?]|$)/gi, '¿Cómo')
+    .replace(/\?C[oó]mo(?=\s|[.,;:!?]|$)/gi, '¿Cómo')
+    .replace(/\?D\?nde(?=\s|[.,;:!?]|$)/gi, '¿Dónde')
+    .replace(/\?D[oó]nde(?=\s|[.,;:!?]|$)/gi, '¿Dónde')
+    .replace(/\?Cu\?ndo(?=\s|[.,;:!?]|$)/gi, '¿Cuándo')
+    .replace(/\?Cu[aá]ndo(?=\s|[.,;:!?]|$)/gi, '¿Cuándo')
+    .replace(/\?Qui\?n(?=\s|[.,;:!?]|$)/gi, '¿Quién')
+    .replace(/\?Qui[eé]n(?=\s|[.,;:!?]|$)/gi, '¿Quién')
+    .replace(/\?Por qu\?(?=\s|[.,;:!?]|$)/gi, '¿Por qué')
+    .replace(/\?Por qu[eé](?=\s|[.,;:!?]|$)/gi, '¿Por qué')
+
+    // Palabras interrogativas / relativas ("qué", "cuál", etc.)
+    .replace(/(^|\s|[.,;:¡¿(])qu\?(?=\s|[.,;:!?)]|$)/g, '$1qué')
+    .replace(/(^|\s|[.,;:¡¿(])Qu\?(?=\s|[.,;:!?)]|$)/g, '$1Qué')
+    .replace(/(^|\s|[.,;:¡¿(])cu\?l(?=\s|[.,;:!?)]|$)/gi, '$1cuál')
+    .replace(/(^|\s|[.,;:¡¿(])c\?mo(?=\s|[.,;:!?)]|$)/gi, '$1cómo')
+    .replace(/(^|\s|[.,;:¡¿(])d\?nde(?=\s|[.,;:!?)]|$)/gi, '$1dónde')
+    .replace(/(^|\s|[.,;:¡¿(])cu\?ndo(?=\s|[.,;:!?)]|$)/gi, '$1cuándo')
+    .replace(/(^|\s|[.,;:¡¿(])qui\?n(?=\s|[.,;:!?)]|$)/gi, '$1quién')
+    .replace(/(^|\s|[.,;:¡¿(])cu\?nt([oa]s?)(?=\s|[.,;:!?)]|$)/gi, '$1cuánt$2')
+    .replace(/(^|\s|[.,;:¡¿(])Cu\?ntame(?=\s|[.,;:!?)]|$)/gi, '$1Cuéntame')
+
+    // Si quedó un ¿Qu? o ¿Cu?l etc.
+    .replace(/¿Qu\?(?=\s|[.,;:!?]|$)/gi, '¿Qué')
+    .replace(/¿Cu\?l(?=\s|[.,;:!?]|$)/gi, '¿Cuál')
+
+    // Sufijos muy comunes en español con tildes dañadas: -ción, -sión, -gión
+    .replace(/([a-zA-ZáéíóúÁÉÍÓÚñÑ])ci\?n(?=\s|[.,;:!?)]|$)/gi, '$1ción')
+    .replace(/([a-zA-ZáéíóúÁÉÍÓÚñÑ])si\?n(?=\s|[.,;:!?)]|$)/gi, '$1sión')
+    .replace(/([a-zA-ZáéíóúÁÉÍÓÚñÑ])gi\?n(?=\s|[.,;:!?)]|$)/gi, '$1gión')
+
+    // Verbos en futuro y condicional (3ra persona singular/plural con tilde en á/án)
+    .replace(/([a-zA-Záéíóúñ]{3,})ar\?(?=\s|[.,;:!?)]|$)/g, '$1ará')
+    .replace(/([a-zA-Záéíóúñ]{3,})er\?(?=\s|[.,;:!?)]|$)/g, '$1erá')
+    .replace(/([a-zA-Záéíóúñ]{3,})ir\?(?=\s|[.,;:!?)]|$)/g, '$1irá')
+    .replace(/([a-zA-Záéíóúñ]{3,})ar\?n(?=\s|[.,;:!?)]|$)/g, '$1arán')
+    .replace(/([a-zA-Záéíóúñ]{3,})er\?n(?=\s|[.,;:!?)]|$)/g, '$1erán')
+    .replace(/([a-zA-Záéíóúñ]{3,})ir\?n(?=\s|[.,;:!?)]|$)/g, '$1irán')
+    .replace(/ver\?n(?=\s|[.,;:!?)]|$)/gi, 'verán')
+    .replace(/(^|\s)est\?(?=\s|[.,;:!?]|$)/gi, '$1está')
+    .replace(/(^|\s)est\?n(?=\s|[.,;:!?]|$)/gi, '$1están')
+
+    // Palabras técnicas frecuentes
+    .replace(/gesti\?n(?=\s|[.,;:!?)]|$)/gi, 'gestión')
+    .replace(/bot\?n(?=\s|[.,;:!?)]|$)/gi, 'botón')
+    .replace(/t\?cnic([oa]s?)(?=\s|[.,;:!?)]|$)/gi, 'técnic$1')
+    .replace(/l\?gic([oa]s?)(?=\s|[.,;:!?)]|$)/gi, 'lógic$1')
+    .replace(/c\?lcul([oa]s?)(?=\s|[.,;:!?)]|$)/gi, 'cálcul$1')
+    .replace(/an\?lisis(?=\s|[.,;:!?)]|$)/gi, 'análisis')
+    .replace(/anal\?tic([oa]s?)(?=\s|[.,;:!?)]|$)/gi, 'analític$1')
+    .replace(/tecnol\?gic([oa]s?)(?=\s|[.,;:!?)]|$)/gi, 'tecnológic$1')
+    .replace(/Tambi\?n(?=\s|[.,;:!?)]|$)/g, 'También')
+    .replace(/tambi\?n(?=\s|[.,;:!?)]|$)/g, 'también')
+    .replace(/Adem\?s(?=\s|[.,;:!?)]|$)/g, 'Además')
+    .replace(/adem\?s(?=\s|[.,;:!?)]|$)/g, 'además')
+    .replace(/seg\?n(?=\s|[.,;:!?)]|$)/gi, 'según')
+    .replace(/clip \?\?/gi, 'clip 📎')
+    .replace(/clip \?/gi, 'clip 📎')
+
+    // Cualquier signo de interrogación que quedó como apertura antes de una mayúscula y que termina en ?
+    .replace(/\?([A-ZÁÉÍÓÚ][^?!\n]+)\?/g, '¿$1?');
+}
+
+/**
  * Convierte Markdown a HTML formateado y seguro para renderizado en Nuxt/Vue.
  */
-export function formatMarkdownToHtml(rawText?: string): string {
+export function formatMarkdownToHtml(rawText?: string, options?: { isDark?: boolean }): string {
   if (!rawText) return "";
-  let text = parseHtmlToMarkdown(String(rawText));
+  const isDark = Boolean(options?.isDark);
+  let text = parseHtmlToMarkdown(sanitizeCorruptedEncoding(rawText));
 
   // Desempaquetar preguntas en línea
   text = text.replace(/([:.]|\bcríticos\b)\s+(\([1-9]\)|\b[1-9]\.)\s+/gi, '$1\n\n$2 ');
   text = text.replace(/([?;])\s+(?:y\s+)?(\([2-9]\)|\b[2-9]\.)\s+/gi, '$1\n\n$2 ');
-
-  // Escapar HTML no deseado antes de parsear formato
-  const escapeHtml = (str: string) =>
-    str.replace(/&/g, '&amp;')
-       .replace(/</g, '&lt;')
-       .replace(/>/g, '&gt;');
 
   // Separar en bloques por párrafos (doble salto de línea)
   const blocks = text.split(/\n\s*\n/);
@@ -73,13 +153,16 @@ export function formatMarkdownToHtml(rawText?: string): string {
 
     // Encabezados (# Titulo)
     if (/^###\s+(.+)$/m.test(trimmed)) {
-      return trimmed.replace(/^###\s+(.+)$/gm, '<h4 class="font-bold text-slate-800 text-sm mt-3 mb-1">$1</h4>');
+      const headerCls = isDark ? 'font-bold text-white text-sm mt-3 mb-1' : 'font-bold text-slate-800 text-sm mt-3 mb-1';
+      return trimmed.replace(/^###\s+(.+)$/gm, `<h4 class="${headerCls}">$1</h4>`);
     }
     if (/^##\s+(.+)$/m.test(trimmed)) {
-      return trimmed.replace(/^##\s+(.+)$/gm, '<h3 class="font-bold text-slate-900 text-base mt-3 mb-1.5">$1</h3>');
+      const headerCls = isDark ? 'font-bold text-white text-base mt-3 mb-1.5' : 'font-bold text-slate-900 text-base mt-3 mb-1.5';
+      return trimmed.replace(/^##\s+(.+)$/gm, `<h3 class="${headerCls}">$1</h3>`);
     }
     if (/^#\s+(.+)$/m.test(trimmed)) {
-      return trimmed.replace(/^#\s+(.+)$/gm, '<h2 class="font-bold text-slate-900 text-lg mt-4 mb-2">$1</h2>');
+      const headerCls = isDark ? 'font-bold text-white text-lg mt-4 mb-2' : 'font-bold text-slate-900 text-lg mt-4 mb-2';
+      return trimmed.replace(/^#\s+(.+)$/gm, `<h2 class="${headerCls}">$1</h2>`);
     }
 
     // Listas con viñetas (- item o * item)
@@ -88,8 +171,9 @@ export function formatMarkdownToHtml(rawText?: string): string {
     if (isBulletList) {
       const items = lines.map(l => {
         let content = l.replace(/^\s*[-*•]\s+/, '');
-        content = parseInlineMarkdown(content);
-        return `<li class="flex items-start gap-2 text-slate-800"><span class="text-[#EB5F46] font-bold select-none leading-relaxed">•</span><span class="flex-1 leading-relaxed">${content}</span></li>`;
+        content = parseInlineMarkdown(content, isDark);
+        const liCls = isDark ? 'flex items-start gap-2 text-white' : 'flex items-start gap-2 text-slate-800';
+        return `<li class="${liCls}"><span class="text-[#EB5F46] font-bold select-none leading-relaxed">•</span><span class="flex-1 leading-relaxed">${content}</span></li>`;
       }).join('');
       return `<ul class="my-2 space-y-1.5 pl-1">${items}</ul>`;
     }
@@ -99,34 +183,49 @@ export function formatMarkdownToHtml(rawText?: string): string {
     if (isNumberedList) {
       const items = lines.map((l, idx) => {
         let content = l.replace(/^\s*(?:\d+\.|\(\d+\))\s+/, '');
-        content = parseInlineMarkdown(content);
-        return `<li class="flex items-start gap-2.5 text-slate-800"><span class="w-5 h-5 rounded-md bg-[#FFF0ED] text-[#EB5F46] flex items-center justify-center text-[10px] font-bold shrink-0 border border-[#FCD9D2] mt-0.5">${idx + 1}</span><span class="flex-1 leading-relaxed">${content}</span></li>`;
+        content = parseInlineMarkdown(content, isDark);
+        const liCls = isDark ? 'flex items-start gap-2.5 text-white' : 'flex items-start gap-2.5 text-slate-800';
+        return `<li class="${liCls}"><span class="w-5 h-5 rounded-md bg-[#FFF0ED] text-[#EB5F46] flex items-center justify-center text-[10px] font-bold shrink-0 border border-[#FCD9D2] mt-0.5">${idx + 1}</span><span class="flex-1 leading-relaxed">${content}</span></li>`;
       }).join('');
       return `<ul class="my-2 space-y-2 pl-1">${items}</ul>`;
     }
 
     // Párrafo normal con saltos de línea convertidos a <br />
-    const parsedLines = lines.map(line => parseInlineMarkdown(line));
-    return `<p class="leading-relaxed text-slate-800 my-1.5">${parsedLines.join('<br />')}</p>`;
+    const parsedLines = lines.map(line => parseInlineMarkdown(line, isDark));
+    const pCls = isDark ? 'leading-relaxed text-white my-1.5' : 'leading-relaxed text-slate-800 my-1.5';
+    return `<p class="${pCls}">${parsedLines.join('<br />')}</p>`;
   });
 
   return htmlBlocks.filter(Boolean).join('');
 }
 
-function parseInlineMarkdown(str: string): string {
+function parseInlineMarkdown(str: string, isDark = false): string {
   let s = str;
 
-  // Negrita: **texto** -> <strong class="font-bold text-slate-900">texto</strong>
-  s = s.replace(/\*\*(.+?)\*\*/g, '<strong class="font-semibold text-slate-900">$1</strong>');
+  // Renderizar etiquetas [Adjunto: nombre_archivo] como pill visual interactivo
+  s = s.replace(/\[Adjunto:\s*([^\]]+)\]/gi, (_match, filename) => {
+    const chipCls = isDark
+      ? 'inline-flex items-center gap-1.5 px-2.5 py-1 my-1 rounded-lg bg-white/10 text-white border border-white/20 font-mono text-[11px] font-semibold'
+      : 'inline-flex items-center gap-1.5 px-2.5 py-1 my-1 rounded-lg bg-amber-50 text-amber-900 border border-amber-200 font-mono text-[11px] font-semibold';
+    return `<span class="${chipCls}">📎 ${filename}</span>`;
+  });
+
+  // Negrita: **texto**
+  const boldCls = isDark ? 'font-bold text-white' : 'font-bold text-slate-900';
+  s = s.replace(/\*\*(.+?)\*\*/g, `<strong class="${boldCls}">$1</strong>`);
 
   // Limpiar asteriscos huérfanos o residuales
   s = s.replace(/^\s*\*\*\s*/, '').replace(/\s*\*\*\s*$/, '');
 
-  // Cursiva: *texto* -> <em class="italic text-slate-700">texto</em>
-  s = s.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, '<em class="italic text-slate-700">$1</em>');
+  // Cursiva: *texto*
+  const emCls = isDark ? 'italic text-slate-200' : 'italic text-slate-700';
+  s = s.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, `<em class="${emCls}">$1</em>`);
 
   // Código en línea: `texto`
-  s = s.replace(/`([^`]+)`/g, '<code class="bg-slate-100 text-slate-800 text-xs px-1.5 py-0.5 rounded font-mono border border-slate-200">$1</code>');
+  const codeCls = isDark
+    ? 'bg-white/20 text-white text-xs px-1.5 py-0.5 rounded font-mono'
+    : 'bg-slate-100 text-slate-800 text-xs px-1.5 py-0.5 rounded font-mono border border-slate-200';
+  s = s.replace(/`([^`]+)`/g, `<code class="${codeCls}">$1</code>`);
 
   return s;
 }

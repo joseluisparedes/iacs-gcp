@@ -539,13 +539,44 @@ async def create_initiative_stage_record(
     db: AsyncSession = Depends(get_db),
     claims: Dict[str, Any] = Depends(get_current_user_claims),
 ):
+    form_id_raw = payload.get("form_id")
+    resolved_form_id = None
+    if form_id_raw:
+        try:
+            resolved_form_id = UUID(str(form_id_raw))
+        except ValueError:
+            res_f = await db.execute(select(StageForm).where(StageForm.code == str(form_id_raw)))
+            f_obj = res_f.scalar_one_or_none()
+            if f_obj:
+                resolved_form_id = f_obj.id
+
+    consent_id_raw = payload.get("consent_id")
+    resolved_consent_id = None
+    if consent_id_raw:
+        try:
+            resolved_consent_id = UUID(str(consent_id_raw))
+        except ValueError:
+            res_c = await db.execute(select(StageConsent).where(StageConsent.code == str(consent_id_raw)))
+            c_obj = res_c.scalar_one_or_none()
+            if c_obj:
+                resolved_consent_id = c_obj.id
+
+    user_id_raw = claims.get("sub") or claims.get("id") or payload.get("user_id")
+    resolved_user_id = None
+    if user_id_raw:
+        try:
+            resolved_user_id = UUID(str(user_id_raw))
+        except ValueError:
+            resolved_user_id = None
+
     record = InitiativeStageRecord(
         initiative_id=id,
         node_id=payload["node_id"],
         stage_name=payload.get("stage_name"),
-        form_id=payload.get("form_id"),
-        consent_id=payload.get("consent_id"),
-        user_name=claims.get("name"),
+        form_id=resolved_form_id,
+        consent_id=resolved_consent_id,
+        user_id=resolved_user_id,
+        user_name=claims.get("name") or payload.get("user_name") or "Usuario del Sistema",
         user_role=payload.get("user_role") or (claims.get("roles", ["registrador"])[0]),
         form_data=payload.get("form_data", {}),
         consent_accepted=payload.get("consent_accepted", True),

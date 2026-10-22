@@ -836,8 +836,12 @@ const sendMessage = async (overrideText?: string) => {
 };
 
 const getPayloadFormData = () => {
+  const currentRegistrador = formData.value.registrador || profile.value.name || 'Key User (Solicitante)';
   return {
     ...formData.value,
+    registrador: currentRegistrador,
+    solicitante: formData.value.solicitante || currentRegistrador,
+    registrador_email: formData.value.registrador_email || profile.value.email || '',
     attached_file: attachedFiles.value[0] ? { name: attachedFiles.value[0].name, size: attachedFiles.value[0].size } : null,
     adjuntos_sustento: attachedFiles.value.map(f => ({
       name: f.name,
@@ -2300,11 +2304,12 @@ const handleSubmitFallback = async () => {
         <!-- Cabecera del Modal -->
         <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/80">
           <div class="flex items-center gap-3">
-            <div class="w-8 h-8 rounded-full bg-[#EB5F46]/10 flex items-center justify-center text-[#EB5F46] border border-[#EB5F46]/20 shrink-0">
-              <Bot class="w-4 h-4" />
+            <div class="w-8 h-8 rounded-full bg-white flex items-center justify-center text-[#EB5F46] border border-slate-200 overflow-hidden shrink-0 shadow-xs">
+              <img v-if="aiAvatar" :src="aiAvatar" :alt="aiName || 'Teo'" class="w-full h-full object-cover" />
+              <Bot v-else class="w-4 h-4" />
             </div>
             <div>
-              <h3 class="text-sm font-bold text-slate-800">Transcripción de la Conversación con Teo</h3>
+              <h3 class="text-sm font-bold text-slate-800">Transcripción de la Conversación con {{ aiName || 'Teo' }}</h3>
               <p class="text-[11px] text-slate-500">
                 {{ chatHistory.length > 0 ? `${chatHistory.length} mensajes intercambiados` : 'Sin mensajes registrados' }} · Iniciativa {{ currentInitiativeId || 'Borrador' }}
               </p>

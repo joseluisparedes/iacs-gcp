@@ -321,7 +321,7 @@ const handleSaveUser = async () => {
 
   saving.value = true;
   try {
-    await $fetch(`${apiBase}/admin/users`, {
+    const saveRes: any = await $fetch(`${apiBase}/admin/users`, {
       method: 'POST',
       body: {
         id: editingId.value,
@@ -338,6 +338,27 @@ const handleSaveUser = async () => {
 
     await fetchData();
     await fetchRoles();
+
+    if (process.client) {
+      const savedUserStr = localStorage.getItem('iacs_user');
+      if (savedUserStr) {
+        try {
+          const currentLoggedUser = JSON.parse(savedUserStr);
+          if (
+            currentLoggedUser.email?.toLowerCase() === newEmail.value.trim().toLowerCase() &&
+            saveRes?.user
+          ) {
+            localStorage.setItem('iacs_user', JSON.stringify({
+              ...currentLoggedUser,
+              ...saveRes.user
+            }));
+          }
+        } catch (e) {}
+      }
+      window.dispatchEvent(new CustomEvent('iacs_user_updated', {
+        detail: { email: newEmail.value.trim(), user: saveRes?.user }
+      }));
+    }
 
     newEmail.value = '';
     newName.value = '';

@@ -30,11 +30,12 @@ const pendingNavPath = ref<string | null>(null);
 
 // Usuario de prueba corporativo (Administrador por defecto en entorno local)
 const user = ref({
+  id: '',
   name: 'Administrador General',
   email: 'admin@iacs.empresa.com',
   roles: ['admin'],
-  vpName: 'Vicepresidencia de Tecnología e Innovación',
-  direcciones: ['Dirección de Arquitectura y Soluciones TI']
+  vpName: '',
+  direcciones: [] as string[]
 });
 
 const userInitials = computed(() => {
@@ -54,10 +55,14 @@ const primaryRoleLabel = computed(() => {
     gerente_area: 'Gerente Área',
     comite: 'Comité',
     vp: 'Aprobador VP',
+    vicepresidente_del_negocio: 'Aprobador VP',
+    business_owner: 'Business Owner',
     estimador: 'Estimador TI',
     gobierno: 'Gobierno TI',
     finanzas: 'Finanzas',
     entrenador_ia: 'Entrenador IA',
+    lider_de_dominio: 'Líder de Dominio',
+    bp_ti: 'BP TI',
   };
   const firstRole = user.value.roles[0];
   return roleNameMap[firstRole] || firstRole.replace(/_/g, ' ');
@@ -148,6 +153,41 @@ const fetchDrafts = async () => {
   }
 };
 
+const syncUserWithBackend = async () => {
+  if (!process.client) return;
+  try {
+    const savedUserStr = localStorage.getItem('iacs_user');
+    const token = localStorage.getItem('iacs_token');
+    const u = savedUserStr ? JSON.parse(savedUserStr) : null;
+    const emailToQuery = u?.email || user.value.email;
+    if (!emailToQuery) return;
+
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    const fresh: any = await $fetch(`${apiBase}/auth/me?email=${encodeURIComponent(emailToQuery)}`, {
+      headers
+    });
+
+    if (fresh && fresh.email) {
+      user.value = {
+        id: fresh.id || user.value.id,
+        name: fresh.name || user.value.name,
+        email: fresh.email || user.value.email,
+        roles: (fresh.roles && fresh.roles.length > 0) ? fresh.roles : user.value.roles,
+        vpName: fresh.vp_name || fresh.vpName || '',
+        direcciones: Array.isArray(fresh.direcciones) ? fresh.direcciones : [],
+      };
+      localStorage.setItem('iacs_user', JSON.stringify({
+        ...(u || {}),
+        ...fresh
+      }));
+    }
+  } catch (err) {
+    console.warn('No se pudo sincronizar perfil de usuario:', err);
+  }
+};
+
 onMounted(() => {
   if (process.client) {
     const savedUser = localStorage.getItem('iacs_user');
@@ -158,12 +198,32 @@ onMounted(() => {
           id: u.id || user.value.id,
           name: u.name || user.value.name,
           email: u.email || user.value.email,
-          roles: u.roles || user.value.roles,
-          vpName: u.vp_name || u.vpName || user.value.vpName,
-          direcciones: u.direcciones || user.value.direcciones || [],
+          roles: (u.roles && u.roles.length > 0) ? u.roles : (u.role ? [u.role] : user.value.roles),
+          vpName: u.vp_name || u.vpName || '',
+          direcciones: Array.isArray(u.direcciones) ? u.direcciones : [],
         };
       } catch (e) {}
     }
+
+    // Sincronizar reactivamente con el backend en segundo plano
+    syncUserWithBackend();
+
+    // Escuchar eventos globales de actualización de usuario (e.g. desde el panel admin)
+    window.addEventListener('iacs_user_updated', (e: any) => {
+      const updatedUser = e?.detail?.user;
+      if (updatedUser && updatedUser.email?.toLowerCase() === user.value.email?.toLowerCase()) {
+        user.value = {
+          id: updatedUser.id || user.value.id,
+          name: updatedUser.name || user.value.name,
+          email: updatedUser.email || user.value.email,
+          roles: (updatedUser.roles && updatedUser.roles.length > 0) ? updatedUser.roles : user.value.roles,
+          vpName: updatedUser.vp_name || updatedUser.vpName || '',
+          direcciones: Array.isArray(updatedUser.direcciones) ? updatedUser.direcciones : [],
+        };
+      } else {
+        syncUserWithBackend();
+      }
+    });
   }
   fetchDrafts();
   if (route.path === '/bandeja') {
@@ -476,7 +536,7 @@ const handleLogout = () => {
                 </p>
                 <div class="flex items-center gap-1.5 mt-0.5">
                   <button 
-                    @click="showRolesModal = true"
+                    @click="showRolesModal = true; syncUserWithBackend()"
                     class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-[#FFF0ED] text-[#EB5F46] border border-[#FCD9D2] hover:bg-[#FDE2DC] transition-colors"
                     title="Ver detalles de roles asignados"
                   >

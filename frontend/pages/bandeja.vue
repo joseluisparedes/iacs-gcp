@@ -12,6 +12,8 @@ const config = useRuntimeConfig();
 const apiBase = config.public.apiBase;
 
 import InstitutionalLoader from "~/components/common/InstitutionalLoader.vue";
+import { DEFAULT_MACRO_STAGES, type MacroStageDef } from "~/utils/macroStages";
+import { sanitizeCorruptedEncoding } from "~/utils/formatHtml";
 
 interface Initiative {
   id: string;
@@ -24,51 +26,75 @@ interface Initiative {
   current_node_id?: string;
 }
 
-type TabKey =
-  | "todas"
-  | "borrador"
-  | "eval_bp"
-  | "aprob_bo"
-  | "aprob_vp"
-  | "asig_demanda"
-  | "estimacion"
-  | "planificacion"
-  | "observada"
-  | "desestimada";
+type TabKey = string;
 
-const TABS: { key: TabKey; label: string; dot: string }[] = [
-  { key: "todas", label: "Todas", dot: "bg-[#4F5AF5]" },
-  { key: "borrador", label: "Borrador", dot: "bg-slate-400" },
-  { key: "eval_bp", label: "Evaluación BP TI", dot: "bg-indigo-500" },
-  { key: "aprob_bo", label: "Aprobación BO", dot: "bg-blue-500" },
-  { key: "aprob_vp", label: "Aprobación VP", dot: "bg-purple-500" },
-  { key: "asig_demanda", label: "Asignación Líder TI", dot: "bg-cyan-500" },
-  { key: "estimacion", label: "Estimación", dot: "bg-amber-500" },
-  { key: "planificacion", label: "Planificación", dot: "bg-emerald-500" },
-  { key: "observada", label: "Observadas", dot: "bg-rose-500" },
-  { key: "desestimada", label: "Desestimadas", dot: "bg-slate-500" },
-];
+// Sincronización dinámica de Macro-Etapas con el Workflow Engine corporativo
+const { data: activeWorkflowData } = await useFetch<any>(`${apiBase}/workflow/active`);
+const activeWorkflow = computed(() => activeWorkflowData.value?.data);
 
-const STATUS_BADGE_STYLE: Record<TabKey, string> = {
+const macroStages = computed<MacroStageDef[]>(() => {
+  const custom = activeWorkflow.value?.graph_json?.macro_stages;
+  if (Array.isArray(custom) && custom.length > 0) {
+    return custom;
+  }
+  return DEFAULT_MACRO_STAGES;
+});
+
+const STAGE_DOT_COLORS: Record<string, string> = {
+  borrador: "bg-slate-400",
+  eval_bp: "bg-indigo-500",
+  aprob_bo: "bg-blue-500",
+  aprob_vp: "bg-purple-500",
+  asig_demanda: "bg-cyan-500",
+  ventana_est: "bg-amber-500",
+  estimacion: "bg-amber-500",
+  planificacion: "bg-emerald-500",
+  observada: "bg-rose-500",
+  desestimada: "bg-slate-500",
+};
+
+// Pestañas dinámicas y exactamente sincronizadas con el Stepper (Imagen 2 y 3)
+const TABS = computed(() => {
+  const tabsList = [
+    { key: "todas", label: "Todas", dot: "bg-[#4F5AF5]" }
+  ];
+
+  macroStages.value.forEach((stage) => {
+    tabsList.push({
+      key: stage.id,
+      label: sanitizeCorruptedEncoding(stage.name),
+      dot: STAGE_DOT_COLORS[stage.id] || "bg-indigo-500",
+    });
+  });
+
+  tabsList.push({ key: "observada", label: "Observadas", dot: "bg-rose-500" });
+  tabsList.push({ key: "desestimada", label: "Desestimadas", dot: "bg-slate-500" });
+
+  return tabsList;
+});
+
+const STATUS_BADGE_STYLE: Record<string, string> = {
   todas: "bg-slate-100 text-slate-700 border-slate-200",
   borrador: "bg-slate-50 text-slate-700 border-slate-200/80",
   eval_bp: "bg-indigo-50 text-indigo-700 border-indigo-200/80",
   aprob_bo: "bg-blue-50 text-blue-700 border-blue-200/80",
   aprob_vp: "bg-purple-50 text-purple-700 border-purple-200/80",
   asig_demanda: "bg-cyan-50 text-cyan-700 border-cyan-200/80",
+  ventana_est: "bg-amber-50 text-amber-700 border-amber-200/80",
   estimacion: "bg-amber-50 text-amber-700 border-amber-200/80",
   planificacion: "bg-emerald-50 text-emerald-700 border-emerald-200/80",
   observada: "bg-rose-50 text-rose-700 border-rose-200/80",
   desestimada: "bg-slate-100 text-slate-600 border-slate-200",
 };
 
-const STATUS_DOT_STYLE: Record<TabKey, string> = {
+const STATUS_DOT_STYLE: Record<string, string> = {
   todas: "bg-slate-400",
   borrador: "bg-slate-400",
   eval_bp: "bg-indigo-500 animate-pulse",
   aprob_bo: "bg-blue-500 animate-pulse",
   aprob_vp: "bg-purple-500 animate-pulse",
   asig_demanda: "bg-cyan-500 animate-pulse",
+  ventana_est: "bg-amber-500",
   estimacion: "bg-amber-500",
   planificacion: "bg-emerald-500",
   observada: "bg-rose-500",
@@ -167,19 +193,58 @@ const profile = ref({
 function getInitiativeStatusInfo(i: any): { label: string; tabKey: TabKey } {
   const label = i?.status || "Sin estado";
   const lower = String(label).toLowerCase();
+  const currNode = String(i?.current_node_id || "").toLowerCase();
 
-  let tabKey: TabKey = "eval_bp";
-  if (lower.includes("desestimad")) tabKey = "desestimada";
-  else if (lower.includes("observad")) tabKey = "observada";
-  else if (lower.includes("borrador")) tabKey = "borrador";
-  else if (lower.includes("bp ti") || lower.includes("pendiente de aprobación")) tabKey = "eval_bp";
-  else if (lower.includes("bo") || lower.includes("patrocinio")) tabKey = "aprob_bo";
-  else if (lower.includes("vp") || lower.includes("vicepresiden")) tabKey = "aprob_vp";
-  else if (lower.includes("líder ti") || lower.includes("lider ti") || lower.includes("dominio") || lower.includes("demanda ti")) tabKey = "asig_demanda";
-  else if (lower.includes("estimaci")) tabKey = "estimacion";
-  else if (lower.includes("planificaci") || lower.includes("en demanda") || lower.includes("planificada")) tabKey = "planificacion";
+  // 1. Estados transversales prioritarios
+  if (lower.includes("desestimad") || currNode.includes("desestimad")) return { label, tabKey: "desestimada" };
+  if (lower.includes("observad") || currNode.includes("observad")) return { label, tabKey: "observada" };
 
-  return { label, tabKey };
+  // 2. FASE 1: Coincidencia EXACTA por current_node_id contra todas las Macro-Etapas (Cabecera o Sub-estados)
+  if (currNode) {
+    for (const stage of macroStages.value) {
+      const sId = stage.id.toLowerCase();
+      const stageNodes = (stage.nodeIds || []).map(nid => nid.toLowerCase());
+      if (currNode === sId || stageNodes.includes(currNode)) {
+        return { label, tabKey: stage.id };
+      }
+    }
+  }
+
+  // 3. FASE 2: Coincidencia por statusKeywords específicas (ignorando 'pendiente' genérico)
+  for (const stage of macroStages.value) {
+    if (Array.isArray(stage.statusKeywords)) {
+      for (const kw of stage.statusKeywords) {
+        if (!kw || kw.toLowerCase() === 'pendiente') continue;
+        try {
+          if (new RegExp(kw, 'i').test(lower)) {
+            return { label, tabKey: stage.id };
+          }
+        } catch {
+          if (lower.includes(kw.toLowerCase())) {
+            return { label, tabKey: stage.id };
+          }
+        }
+      }
+    }
+  }
+
+  // 4. FASE 3: Coincidencia por nombre de etapa
+  for (const stage of macroStages.value) {
+    if (stage.name && (lower === stage.name.toLowerCase() || lower.includes(stage.name.toLowerCase()))) {
+      return { label, tabKey: stage.id };
+    }
+  }
+
+  // 5. Fallback si no hubo coincidencia dinámica previa
+  if (lower.includes("borrador") || currNode === "borrador" || currNode === "start") return { label, tabKey: "borrador" };
+  if (currNode === "eval_bp" || lower.includes("viabilidad")) return { label, tabKey: "eval_bp" };
+  if (currNode === "aprob_bo" || lower.includes("patrocinio")) return { label, tabKey: "aprob_bo" };
+  if (currNode === "aprob_vp" || lower.includes("vicepresiden")) return { label, tabKey: "aprob_vp" };
+  if (currNode === "asig_demanda" || lower.includes("demanda") || lower.includes("líder ti")) return { label, tabKey: "asig_demanda" };
+  if (currNode === "ventana_est" || currNode.includes("est_") || lower.includes("estimac")) return { label, tabKey: "ventana_est" };
+  if (currNode === "planificacion" || currNode.includes("plan_") || lower.includes("planific") || currNode === "end") return { label, tabKey: "planificacion" };
+
+  return { label, tabKey: "todas" };
 }
 
 function formatDate(iso: string) {
@@ -226,7 +291,23 @@ function formatInstitucion(val: any): string {
 }
 
 function getKeyUserName(i: Initiative): string {
-  return i.form_data?.registrador || i.form_data?.solicitante || "Sin registrador";
+  const fd = i?.form_data || {};
+  if (fd.registrador) return fd.registrador;
+  if (fd.solicitante) return fd.solicitante;
+  if (fd.lider_solicitante) return fd.lider_solicitante;
+  if (fd.key_user) return fd.key_user;
+  if (fd.nombre_solicitante) return fd.nombre_solicitante;
+  if (fd.registrador_nombre) return fd.registrador_nombre;
+  if (fd.registrador_email) return fd.registrador_email;
+
+  if (Array.isArray(fd._observation_history) && fd._observation_history.length > 0) {
+    const firstAction = fd._observation_history[0];
+    if (firstAction?.user_name && firstAction.user_name !== "Sistema") {
+      return firstAction.user_name;
+    }
+  }
+
+  return "Sin registrador";
 }
 
 function getKeyUserInitials(i: Initiative): string {
@@ -236,6 +317,17 @@ function getKeyUserInitials(i: Initiative): string {
     return (parts[0][0] + parts[1][0]).toUpperCase();
   }
   return name.substring(0, 2).toUpperCase() || "US";
+}
+
+function getInitiativeBpTi(i: any): string {
+  const fd = i?.form_data || {};
+  return (
+    fd.bp_ti_asignado ||
+    fd.bp_ti_responsable ||
+    fd.business_partner ||
+    fd.bp_ti ||
+    ""
+  );
 }
 
 function getInitiativeTitle(i: Initiative): string {
@@ -308,7 +400,7 @@ const metrics = computed(() => {
   }).length;
   const enEstimacionPlan = initiatives.value.filter(i => {
     const k = getInitiativeStatusInfo(i).tabKey;
-    return k === "estimacion" || k === "planificacion";
+    return k === "estimacion" || k === "ventana_est" || k === "planificacion";
   }).length;
   const borradores = initiatives.value.filter(i => getInitiativeStatusInfo(i).tabKey === "borrador").length;
 
@@ -346,7 +438,7 @@ const direccionesOptions = computed(() => {
 const bpsOptions = computed(() => {
   const set = new Set<string>();
   initiatives.value.forEach(i => {
-    const bp = i.form_data?.bp_ti_asignado;
+    const bp = getInitiativeBpTi(i);
     if (bp) set.add(bp);
   });
   return Array.from(set).sort().map(val => ({ label: val, value: val }));
@@ -392,7 +484,7 @@ const filteredInitiatives = computed(() => {
       if (!d || !selectedDirecciones.value.includes(d)) return false;
     }
     if (selectedBPs.value.length > 0) {
-      const bp = i.form_data?.bp_ti_asignado;
+      const bp = getInitiativeBpTi(i);
       if (!bp || !selectedBPs.value.includes(bp)) return false;
     }
     if (selectedVicepresidencias.value.length > 0) {
@@ -406,7 +498,7 @@ const filteredInitiatives = computed(() => {
       const id = i.id.toLowerCase();
       const idShort = (i.summary?.id_corta ?? "").toString().toLowerCase();
       const reg = (i.form_data?.registrador ?? "").toString().toLowerCase();
-      const bp = (i.form_data?.bp_ti_asignado ?? "").toString().toLowerCase();
+      const bp = getInitiativeBpTi(i).toLowerCase();
       if (!title.includes(q) && !obj.includes(q) && !id.includes(q) && !idShort.includes(q) && !reg.includes(q) && !bp.includes(q)) {
         return false;
       }
@@ -459,8 +551,8 @@ const sortedAndFiltered = computed(() => {
         valB = b.form_data?.registrador || b.form_data?.solicitante || "";
         break;
       case "bp":
-        valA = a.form_data?.bp_ti_asignado || "";
-        valB = b.form_data?.bp_ti_asignado || "";
+        valA = getInitiativeBpTi(a);
+        valB = getInitiativeBpTi(b);
         break;
       case "estado":
         valA = getInitiativeStatusInfo(a).label || "";
@@ -1239,11 +1331,11 @@ const activeFilterCount = computed(() => {
 
                 <!-- BP TI -->
                 <div v-else-if="colId === 'bp'">
-                  <div v-if="i.form_data?.bp_ti_asignado" class="flex items-center gap-1.5 text-xs font-medium text-slate-800">
+                  <div v-if="getInitiativeBpTi(i)" class="flex items-center gap-1.5 text-xs font-medium text-slate-800">
                     <div class="w-5 h-5 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-[9px] font-bold text-slate-600 shrink-0">
-                      {{ i.form_data.bp_ti_asignado.substring(0, 2).toUpperCase() }}
+                      {{ getInitiativeBpTi(i).substring(0, 2).toUpperCase() }}
                     </div>
-                    <span class="truncate" :title="i.form_data.bp_ti_asignado">{{ i.form_data.bp_ti_asignado }}</span>
+                    <span class="truncate" :title="getInitiativeBpTi(i)">{{ getInitiativeBpTi(i) }}</span>
                   </div>
                   <div v-else class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-amber-50 text-amber-700 border border-amber-200/70">
                     <AlertCircle class="w-3 h-3 text-amber-600 shrink-0" />
@@ -1402,8 +1494,8 @@ const activeFilterCount = computed(() => {
               </div>
               <div class="space-y-1 pt-2 border-t border-slate-200/50">
                 <span class="text-slate-400 font-medium">BP TI Asignado</span>
-                <p :class="['font-bold', selectedInitiative.form_data?.bp_ti_asignado ? 'text-slate-800' : 'text-amber-600']">
-                  {{ selectedInitiative.form_data?.bp_ti_asignado || 'Sin asignar' }}
+                <p :class="['font-bold', getInitiativeBpTi(selectedInitiative) ? 'text-slate-800' : 'text-amber-600']">
+                  {{ getInitiativeBpTi(selectedInitiative) || 'Sin asignar' }}
                 </p>
               </div>
               <div class="space-y-1 pt-2 border-t border-slate-200/50 col-span-2">

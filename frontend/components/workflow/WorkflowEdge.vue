@@ -1,4 +1,5 @@
 <script setup lang="ts">
+defineOptions({ inheritAttrs: false });
 import { computed } from 'vue';
 import { BaseEdge, EdgeLabelRenderer, getSmoothStepPath, Position, useVueFlow } from '@vue-flow/core';
 import { ArrowRight, X } from 'lucide-vue-next';
@@ -20,9 +21,10 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'select-edge', id: string): void;
+  (e: 'delete-edge', id: string): void;
 }>();
 
-const { removeEdges, findEdge } = useVueFlow();
+const { removeEdges, findEdge, addSelectedEdges } = useVueFlow();
 
 const pathData = computed(() => {
   return getSmoothStepPath({
@@ -76,14 +78,17 @@ const handleChipClick = (e: MouseEvent) => {
   e.stopPropagation();
   const edge = findEdge(props.id);
   if (edge) {
-    edge.selected = true;
+    addSelectedEdges([edge]);
   }
   emit('select-edge', props.id);
 };
 
 const handleDelete = (e: MouseEvent) => {
   e.stopPropagation();
-  removeEdges([props.id]);
+  emit('delete-edge', props.id);
+  try {
+    removeEdges([props.id]);
+  } catch (err) {}
 };
 </script>
 
@@ -135,11 +140,11 @@ const handleDelete = (e: MouseEvent) => {
         position: 'absolute',
         transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
         pointerEvents: 'all',
-        zIndex: selected ? 100 : 10,
+        zIndex: selected ? 100 : 20,
       }"
       class="nodrag nopan"
     >
-      <!-- Chip interactivo que se convierte en el botón del flujo -->
+      <!-- Chip interactivo que se convierte en el botón del flujo con texto completo visible -->
       <div
         @click="handleChipClick"
         :style="{
@@ -148,24 +153,32 @@ const handleDelete = (e: MouseEvent) => {
           color: customTextColor || (customColor || (selected ? '#4F5AF5' : isObservacionEdge ? '#92400E' : isDesestimacionEdge ? '#991B1B' : '#334155')),
         }"
         :class="[
-          'flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold border shadow-xs transition-all cursor-pointer select-none group',
+          'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-bold border shadow-xs transition-all cursor-pointer select-none group',
           selected
-            ? 'ring-2 ring-offset-1 scale-105 shadow-md font-extrabold'
-            : 'hover:scale-102 hover:shadow-sm'
+            ? 'ring-2 ring-offset-1 scale-105 shadow-md font-extrabold z-50'
+            : 'hover:scale-105 hover:shadow-md hover:z-40'
         ]"
         :title="'Transición: ' + (label || 'Avanzar') + ' (Clic para configurar botón y roles)'"
       >
         <ArrowRight
-          class="w-3 h-3 shrink-0 transition-transform group-hover:translate-x-0.5"
+          class="w-3.5 h-3.5 shrink-0 transition-transform group-hover:translate-x-0.5"
           :style="{ color: customTextColor || customColor || (selected ? '#4F5AF5' : '#64748B') }"
         />
-        <span class="truncate max-w-[140px] font-semibold">
+
+        <span
+          :class="[
+            'font-semibold text-center leading-tight transition-all',
+            selected
+              ? 'whitespace-normal max-w-[280px]'
+              : 'max-w-[220px] line-clamp-2 group-hover:max-w-[340px] group-hover:line-clamp-none'
+          ]"
+        >
           {{ label || 'Avanzar' }}
         </span>
 
         <span
           v-if="conditionType && conditionType !== 'always'"
-          class="text-[9px] px-1.5 py-0.2 bg-amber-100 text-amber-900 rounded font-mono font-bold"
+          class="text-[9px] px-1.5 py-0.2 bg-amber-100 text-amber-900 rounded font-mono font-bold shrink-0"
         >
           {{ conditionType === 'field_required' ? 'Req' : conditionType === 'vobo_check' ? 'VoBo' : conditionType.includes('presupuesto') ? 'Cond' : 'Rol' }}
         </span>
@@ -173,8 +186,8 @@ const handleDelete = (e: MouseEvent) => {
         <!-- Botón circular rojo (x) para desconectar/eliminar -->
         <button
           type="button"
-          @click="handleDelete"
-          class="w-4 h-4 ml-0.5 rounded-full bg-red-500 hover:bg-red-600 text-white flex items-center justify-center transition-colors shadow-2xs"
+          @click.stop="handleDelete"
+          class="w-4 h-4 ml-0.5 rounded-full bg-red-500 hover:bg-red-600 text-white flex items-center justify-center transition-colors shadow-2xs shrink-0 opacity-80 hover:opacity-100"
           title="Eliminar o desconectar esta flecha"
         >
           <X class="w-2.5 h-2.5" />
