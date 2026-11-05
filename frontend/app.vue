@@ -153,6 +153,33 @@ const fetchDrafts = async () => {
   }
 };
 
+// Notificaciones (acciones pendientes / cambios relevantes)
+const notifications = ref<any[]>([]);
+const fetchNotifications = async () => {
+  try {
+    const data: any[] = await $fetch(`${apiBase}/initiatives`).catch(() => []);
+    notifications.value = (data || []).filter((init: any) => {
+      const isMine = Boolean(
+        (user.value.id && init.user_id === user.value.id) ||
+        (user.value.email && init.form_data?.registrador_email === user.value.email) ||
+        (user.value.name && (init.form_data?.registrador === user.value.name || init.form_data?.solicitante === user.value.name))
+      );
+      if (!isMine) return false;
+
+      const reachedSummary = init.form_data?._reached_summary === true;
+      const isChatOrDraft = init.status === 'Chat' || (init.status === 'Borrador' && !reachedSummary);
+      if (isChatOrDraft) return false;
+
+      const finalized = ['Aprobada', 'Implementada', 'Cerrada', 'Desestimada'].includes(init.status);
+      if (finalized) return false;
+
+      return true;
+    }).slice(0, 20);
+  } catch (e) {
+    notifications.value = [];
+  }
+};
+
 const syncUserWithBackend = async () => {
   if (!process.client) return;
   try {
@@ -223,9 +250,12 @@ onMounted(() => {
       } else {
         syncUserWithBackend();
       }
+      fetchDrafts();
+      fetchNotifications();
     });
   }
   fetchDrafts();
+  fetchNotifications();
   if (route.path === '/bandeja') {
     sidebarCollapsed.value = true;
   }
@@ -422,9 +452,40 @@ const handleLogout = () => {
             <button 
               @click="notificationsOpen = !notificationsOpen; draftsOpen = false"
               class="w-9 h-9 rounded-lg border border-white/20 flex items-center justify-center text-white/90 hover:bg-white/10 transition-colors relative"
+              title="Notificaciones"
             >
               <Bell class="w-4 h-4" />
+              <span v-if="notifications.length > 0" class="absolute -top-1.5 -right-1.5 bg-[#EB5F46] text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center border-2 border-white">
+                {{ notifications.length }}
+              </span>
             </button>
+
+            <div v-if="notificationsOpen" class="absolute right-0 mt-2 w-80 bg-white rounded-xl shadow-lg border border-[#e4e6ea] z-50 overflow-hidden">
+              <div class="px-4 py-3 border-b border-[#e4e6ea] bg-[#f7f8fc] flex items-center justify-between">
+                <h3 class="text-xs font-bold text-[#1a1a2e] uppercase tracking-wider">Notificaciones</h3>
+                <NuxtLink to="/bandeja" @click="notificationsOpen = false" class="text-[10px] text-[#EB5F46] font-semibold hover:underline">Ver bandeja</NuxtLink>
+              </div>
+              <div class="max-h-72 overflow-y-auto p-2">
+                <p v-if="notifications.length === 0" class="text-xs text-[#9ca3af] text-center py-4">No hay notificaciones nuevas.</p>
+                <NuxtLink 
+                  v-for="n in notifications" 
+                  :key="n.id"
+                  :to="`/iniciativa/${n.id}`"
+                  @click="notificationsOpen = false"
+                  class="group flex items-start gap-2 p-2 rounded-lg hover:bg-[#f7f8fc] transition-colors border border-transparent hover:border-[#e4e6ea] mb-1"
+                >
+                  <div class="w-2 h-2 rounded-full bg-[#EB5F46] mt-1.5 shrink-0"></div>
+                  <div class="flex-1 min-w-0">
+                    <p class="text-sm font-semibold text-[#1a1a2e] truncate">
+                      {{ n.form_data?.titulo || n.title || 'Iniciativa sin título' }}
+                    </p>
+                    <p class="text-[10px] text-[#6b7280] mt-0.5">
+                      Estado: <span class="font-semibold">{{ n.status }}</span> · {{ n.updated_at ? new Date(n.updated_at).toLocaleDateString() : '' }}
+                    </p>
+                  </div>
+                </NuxtLink>
+              </div>
+            </div>
           </div>
 
           <!-- Botón Destacado Nueva Necesidad -->
